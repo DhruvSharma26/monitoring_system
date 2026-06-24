@@ -1,9 +1,8 @@
 const Otp = require("../models/Otp");
-const nodemailer = require("nodemailer");
+const SibApiV3Sdk = require("@getbrevo/brevo");
 
 const sendOtp = async (req, res) => {
     try {
-
         const { email } = req.body;
 
         if (!email) {
@@ -13,13 +12,9 @@ const sendOtp = async (req, res) => {
             });
         }
 
-        const otp = Math.floor(
-            100000 + Math.random() * 900000
-        ).toString();
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-        const expiry = new Date(
-            Date.now() + 5 * 60 * 1000
-        );
+        const expiry = new Date(Date.now() + 5 * 60 * 1000);
 
         await Otp.deleteMany({ email });
 
@@ -29,35 +24,41 @@ const sendOtp = async (req, res) => {
             expiresAt: expiry
         });
 
-        const transporter = nodemailer.createTransport({
-    host: "smtp-relay.brevo.com",
-    port: 587,
-    secure: false,
-    auth: {
-        user: process.env.BREVO_USER,
-        pass: process.env.BREVO_PASS
-    }
-});
-        await transporter.verify();
-console.log("Brevo SMTP Connected");
+        // Initialize Brevo API
+        const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
 
-        await transporter.sendMail({
-            from: process.env.EMAIL_FROM,
-            to: email,
+        apiInstance.setApiKey(
+            SibApiV3Sdk.TransactionalEmailsApiApiKeys.apiKey,
+            process.env.BREVO_API_KEY
+        );
+
+        const sendSmtpEmail = {
+            sender: {
+                email: process.env.EMAIL_FROM,
+                name: "Monitoring System"
+            },
+            to: [
+                {
+                    email: email
+                }
+            ],
             subject: "OTP Verification",
-            text: `Your OTP is ${otp}`
-        });
+            textContent: `Your OTP is ${otp}`
+        };
 
-        res.status(200).json({
+        await apiInstance.sendTransacEmail(sendSmtpEmail);
+
+        return res.status(200).json({
             success: true,
             message: "OTP sent successfully"
         });
 
     } catch (error) {
 
-        console.log(error);
+        console.error("Brevo Error:");
+        console.error(error.response?.body || error);
 
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "Server Error"
         });
@@ -84,28 +85,26 @@ const verifyOtp = async (req, res) => {
         }
 
         if (otpRecord.expiresAt < new Date()) {
-
             return res.status(400).json({
                 success: false,
                 message: "OTP Expired"
             });
-
         }
 
         otpRecord.verified = true;
 
         await otpRecord.save();
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             message: "OTP Verified"
         });
 
     } catch (error) {
 
-        console.log(error);
+        console.error(error);
 
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "Server Error"
         });
