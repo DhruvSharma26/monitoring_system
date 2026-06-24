@@ -1,5 +1,5 @@
 const Otp = require("../models/Otp");
-const SibApiV3Sdk = require("@getbrevo/brevo");
+const axios = require("axios");
 
 const sendOtp = async (req, res) => {
     try {
@@ -24,29 +24,28 @@ const sendOtp = async (req, res) => {
             expiresAt: expiry
         });
 
-        // Initialize Brevo API
-        const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
-
-        apiInstance.setApiKey(
-            SibApiV3Sdk.TransactionalEmailsApiApiKeys.apiKey,
-            process.env.BREVO_API_KEY
-        );
-
-        const sendSmtpEmail = {
-            sender: {
-                email: process.env.EMAIL_FROM,
-                name: "Monitoring System"
+        await axios.post(
+            "https://api.brevo.com/v3/smtp/email",
+            {
+                sender: {
+                    name: "Monitoring System",
+                    email: process.env.EMAIL_FROM
+                },
+                to: [
+                    {
+                        email: email
+                    }
+                ],
+                subject: "OTP Verification",
+                textContent: `Your OTP is ${otp}`
             },
-            to: [
-                {
-                    email: email
+            {
+                headers: {
+                    "api-key": process.env.BREVO_API_KEY,
+                    "Content-Type": "application/json"
                 }
-            ],
-            subject: "OTP Verification",
-            textContent: `Your OTP is ${otp}`
-        };
-
-        await apiInstance.sendTransacEmail(sendSmtpEmail);
+            }
+        );
 
         return res.status(200).json({
             success: true,
@@ -56,7 +55,7 @@ const sendOtp = async (req, res) => {
     } catch (error) {
 
         console.error("Brevo Error:");
-        console.error(error.response?.body || error);
+        console.error(error.response?.data || error.message);
 
         return res.status(500).json({
             success: false,
@@ -67,7 +66,6 @@ const sendOtp = async (req, res) => {
 };
 
 const verifyOtp = async (req, res) => {
-
     try {
 
         const { email, otp } = req.body;
