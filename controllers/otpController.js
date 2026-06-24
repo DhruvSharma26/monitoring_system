@@ -30,17 +30,19 @@ const sendOtp = async (req, res) => {
         });
 
         const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
+    host: "smtp-relay.brevo.com",
     port: 587,
     secure: false,
     auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
+        user: process.env.BREVO_USER,
+        pass: process.env.BREVO_PASS
     }
 });
+        await transporter.verify();
+console.log("Brevo SMTP Connected");
 
         await transporter.sendMail({
-            from: process.env.EMAIL_USER,
+            from: process.env.EMAIL_FROM,
             to: email,
             subject: "OTP Verification",
             text: `Your OTP is ${otp}`
