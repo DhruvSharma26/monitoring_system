@@ -3,6 +3,8 @@ require("dotenv").config();
 const mqtt = require("mqtt");
 const express = require("express");
 const cors = require("cors");
+const http = require("http");
+const { Server } = require("socket.io");
 
 const connectDB = require("./config/db");
 const helmet = require("helmet");
@@ -37,6 +39,14 @@ require("./routes/alertRoutes");
 const reportRoutes =
 require("./routes/reportRoutes");
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
+global.io = io; // Make io globally accessible
 
 app.use(cors());
 app.use(express.json());
@@ -230,6 +240,19 @@ console.log(
   "💾 Sensor data & device status saved"
 );
 
+// Emit WebSocket event to frontend
+if (global.io) {
+  global.io.emit("device_status_update", sensorPayload);
+  
+  // Basic threshold check for alert emission
+  if (sensorPayload.OdorSensVal > 80 || sensorPayload.Counter > 100) {
+    global.io.emit("new_alert", {
+      device_uid: sensorPayload.device_uid,
+      message: "Threshold exceeded!"
+    });
+  }
+}
+
       } catch (error) {
 
         console.log(
@@ -258,8 +281,11 @@ connectMQTT();
 const PORT =
   process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(
     `🚀 Server Running on Port ${PORT}`
+  );
+  console.log(
+    `🔌 WebSocket Server attached`
   );
 });
