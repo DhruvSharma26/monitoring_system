@@ -13,6 +13,7 @@ const validate = (req, res, next) => {
 };
 
 const registerAdminValidator = [
+    body("userId").notEmpty().withMessage("User ID is required"),
     body("email").isEmail().withMessage("Valid email is required"),
     body("password").isLength({ min: 6 }).withMessage("Password must be at least 6 characters"),
     body("companyName").notEmpty().withMessage("Company name is required"),
@@ -22,7 +23,12 @@ const registerAdminValidator = [
 ];
 
 const loginValidator = [
-    body("userId").notEmpty().withMessage("User ID is required"),
+    body().custom((value, { req }) => {
+        if (!req.body.email && !req.body.userId && !req.body.identifier) {
+            throw new Error('Please provide email, userId, or identifier');
+        }
+        return true;
+    }),
     body("password").notEmpty().withMessage("Password is required"),
     validate
 ];

@@ -13,7 +13,7 @@ const getDailyReport = async (req, res) => {
         const today =
             new Date();
 
-        today.setHours(0,0,0,0);
+        today.setHours(0, 0, 0, 0);
 
         const alerts =
             await Alert.countDocuments({
@@ -67,13 +67,13 @@ const getDailyReport = async (req, res) => {
 
         });
 
-    } catch(error) {
+    } catch (error) {
 
         console.log(error);
 
         res.status(500).json({
-            success:false,
-            message:"Server Error"
+            success: false,
+            message: "Server Error"
         });
 
     }
@@ -107,17 +107,17 @@ const getWeeklyReport = async (req, res) => {
 
         const completed =
             await Task.countDocuments({
-                status:"VERIFIED",
-                createdAt:{
-                    $gte:start
+                status: "VERIFIED",
+                createdAt: {
+                    $gte: start
                 }
             });
 
         res.status(200).json({
 
-            success:true,
+            success: true,
 
-            report:{
+            report: {
 
                 alerts,
 
@@ -129,56 +129,56 @@ const getWeeklyReport = async (req, res) => {
 
         });
 
-    } catch(error){
+    } catch (error) {
 
         console.log(error);
 
         res.status(500).json({
-            success:false,
-            message:"Server Error"
+            success: false,
+            message: "Server Error"
         });
 
     }
 
 };
-const getMonthlyReport = async (req,res)=>{
+const getMonthlyReport = async (req, res) => {
 
-    try{
+    try {
 
         const start =
             new Date();
 
         start.setMonth(
-            start.getMonth()-1
+            start.getMonth() - 1
         );
 
         const alerts =
             await Alert.countDocuments({
-                createdAt:{
-                    $gte:start
+                createdAt: {
+                    $gte: start
                 }
             });
 
         const tasks =
             await Task.countDocuments({
-                createdAt:{
-                    $gte:start
+                createdAt: {
+                    $gte: start
                 }
             });
 
         const completed =
             await Task.countDocuments({
-                status:"VERIFIED",
-                createdAt:{
-                    $gte:start
+                status: "VERIFIED",
+                createdAt: {
+                    $gte: start
                 }
             });
 
         res.status(200).json({
 
-            success:true,
+            success: true,
 
-            report:{
+            report: {
 
                 alerts,
 
@@ -190,19 +190,19 @@ const getMonthlyReport = async (req,res)=>{
 
         });
 
-    } catch(error){
+    } catch (error) {
 
         console.log(error);
 
         res.status(500).json({
-            success:false,
-            message:"Server Error"
+            success: false,
+            message: "Server Error"
         });
 
     }
 
 };
-};
+
 const getReportStats = async (req, res) => {
     try {
         const stats = {

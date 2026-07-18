@@ -9,6 +9,7 @@ const registerAdmin = async (req, res, next) => {
     try {
 
         const {
+            userId,
             companyName,
             country,
             contactPerson,
@@ -46,20 +47,25 @@ const registerAdmin = async (req, res, next) => {
 
         }
 
-        const adminCount = await User.countDocuments({
-            role: "admin"
+        const existingId = await User.findOne({
+            userId
         });
 
-        const adminId =
-            "ADM" +
-            String(adminCount + 1).padStart(3, "0");
+        if (existingId) {
+
+            return res.status(400).json({
+                success: false,
+                message: "User ID already exists"
+            });
+
+        }
 
         const hashedPassword =
             await bcrypt.hash(password, 10);
 
         const admin = await User.create({
 
-            userId: adminId,
+            userId,
 
             role: "admin",
 
@@ -98,12 +104,29 @@ const login = async (req, res, next) => {
     try {
 
         const {
+            email,
             userId,
+            identifier,
             password
         } = req.body;
+        
+        // Determine the search criteria based on what is provided
+        let query = {};
+        if (identifier) {
+            query = { $or: [{ email: identifier }, { userId: identifier }] };
+        } else if (email) {
+            query = { email };
+        } else if (userId) {
+            query = { userId };
+        } else {
+            return res.status(400).json({
+                success: false,
+                message: "Please provide email, userId, or identifier"
+            });
+        }
 
         const user =
-            await User.findOne({ userId });
+            await User.findOne(query);
 
         if (!user) {
 
