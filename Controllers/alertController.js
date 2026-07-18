@@ -145,8 +145,6 @@ const resolveAlert = async (req, res) => {
 
 };
 
-};
-
 const assignAlert = async (req, res) => {
     try {
         const { staff_id } = req.body;
