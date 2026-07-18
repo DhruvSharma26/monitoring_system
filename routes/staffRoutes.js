@@ -7,7 +7,8 @@ require("../middleware/authMiddleware");
 
 const {
     registerStaff,
-    getStaff
+    getStaff,
+    deleteStaff
 } = require(
     "../controllers/staffController"
 );
@@ -22,6 +23,12 @@ router.get(
     "/",
     authMiddleware,
     getStaff
+);
+
+router.delete(
+    "/:id",
+    authMiddleware,
+    deleteStaff
 );
 
 module.exports = router;

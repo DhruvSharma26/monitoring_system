@@ -32,6 +32,13 @@ const registerStaff = async (req, res) => {
             await User.countDocuments({
                 role: "staff"
             });
+            
+        if (staffCount >= 2) {
+            return res.status(400).json({
+                success: false,
+                message: "Maximum of 2 staffs allowed"
+            });
+        }
 
         const staffId =
             "STF" +
@@ -119,7 +126,27 @@ const getStaff = async (req, res) => {
 
 };
 
+const deleteStaff = async (req, res) => {
+    try {
+        const staff = await User.findById(req.params.id);
+        if (!staff || staff.role !== "staff") {
+            return res.status(404).json({ success: false, message: "Staff not found" });
+        }
+
+        if (staff.assignedDevice) {
+            await Device.findByIdAndUpdate(staff.assignedDevice, { assignedStaff: null });
+        }
+
+        await User.findByIdAndDelete(req.params.id);
+        res.status(200).json({ success: true, message: "Staff deleted" });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+};
+
 module.exports = {
     registerStaff,
-    getStaff
+    getStaff,
+    deleteStaff
 };
