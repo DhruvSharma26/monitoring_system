@@ -54,7 +54,13 @@ app.use(express.json());
 connectDB();
 
 app.use(helmet());
-app.use(mongoSanitize());
+app.use((req, res, next) => {
+  if (req.body) req.body = mongoSanitize.sanitize(req.body);
+  if (req.params) req.params = mongoSanitize.sanitize(req.params);
+  if (req.headers) req.headers = mongoSanitize.sanitize(req.headers);
+  if (req.query) mongoSanitize.sanitize(req.query); // Mutates in place without reassignment
+  next();
+});
 app.use(apiLimiter);
 
 app.use("/api/auth", authRoutes);
