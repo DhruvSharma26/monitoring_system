@@ -23,7 +23,7 @@ require("./routes/passwordRoutes");
 const settingsRoutes =
 require("./routes/settingsRoutes");
 const SensorData = require("./models/SensorData");
-const DeviceStatus = require("./models/DeviceStatus");
+const LatestDeviceStatus = require("./models/LatestDeviceStatus");
 const dashboardRoutes =
 require("./routes/dashboardRoutes");
 const taskRoutes =
@@ -222,7 +222,7 @@ await SensorData.create(
 );
 
 // Update latest device state
-await DeviceStatus.findOneAndUpdate(
+await LatestDeviceStatus.findOneAndUpdate(
 {
   device_uid:
     payload.device_uid
