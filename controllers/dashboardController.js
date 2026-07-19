@@ -36,14 +36,14 @@ const getDashboard = async (req, res) => {
         statuses.forEach(item => {
 
             if (
-                item.feedback === 1 ||
-                item.feedback === 2
+                item.feedback === 0 ||
+                item.feedback === 1
             ) {
                 clean++;
             }
 
             else if (
-                item.feedback === 3
+                item.feedback === 2
             ) {
                 attention++;
             }
@@ -56,15 +56,12 @@ const getDashboard = async (req, res) => {
 
             switch (item.feedback) {
 
+                case 0:
                 case 1:
                     totalRating += 5;
                     break;
 
                 case 2:
-                    totalRating += 4;
-                    break;
-
-                case 3:
                     totalRating += 2;
                     break;
 
@@ -192,12 +189,12 @@ const getMapData = async (req, res) => {
                         statusData.feedback
                     ) {
 
+                        case 0:
                         case 1:
-                        case 2:
                             status = "clean";
                             break;
 
-                        case 3:
+                        case 2:
                             status = "attention";
                             break;
 
@@ -432,7 +429,7 @@ const getAttentionCriticalToilets =
                     continue;
 
                 if (
-                    status.feedback === 3 ||
+                    status.feedback === 2 ||
                     status.feedback === 4
                 ) {
 
@@ -460,7 +457,7 @@ const getAttentionCriticalToilets =
                             status.feedback,
 
                         status:
-                            status.feedback === 3
+                            status.feedback === 2
                                 ? "ATTENTION"
                                 : "CRITICAL",
 

@@ -45,7 +45,7 @@ const getToilets = async (req, res) => {
                 "CLEAN";
 
             if (
-                latestStatus.feedback === 3
+                latestStatus.feedback === 2
             ) {
 
                 toiletStatus =
@@ -78,15 +78,12 @@ const getToilets = async (req, res) => {
                 latestStatus.feedback
             ) {
 
+                case 0:
                 case 1:
                     rating = 5;
                     break;
 
                 case 2:
-                    rating = 4;
-                    break;
-
-                case 3:
                     rating = 2;
                     break;
 

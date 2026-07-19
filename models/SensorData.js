@@ -20,7 +20,7 @@ const sensorDataSchema = new mongoose.Schema(
 
     feedback: {
         type: Number,
-        enum: [0, 1, 2, 3], // 0=Excellent, 1=Good, 2=Bad, 3=Very Bad (assuming similar scale)
+        enum: [0, 1, 2, 3, 4], // 0=Clean, 1=Clean, 2=Warning, 4=Critical
         required: true
     },
 

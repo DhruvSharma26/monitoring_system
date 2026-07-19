@@ -24,6 +24,7 @@ const settingsRoutes =
 require("./routes/settingsRoutes");
 const SensorData = require("./models/SensorData");
 const LatestDeviceStatus = require("./models/LatestDeviceStatus");
+const Alert = require("./models/Alert");
 const dashboardRoutes =
 require("./routes/dashboardRoutes");
 const taskRoutes =
@@ -250,11 +251,40 @@ console.log(
 if (global.io) {
   global.io.emit("device_status_update", sensorPayload);
   
-  // Basic threshold check for alert emission
-  if (sensorPayload.OdorSensVal > 80 || sensorPayload.Counter > 100) {
+  let alertType = null;
+  let alertMessage = "";
+
+  if (sensorPayload.feedback === 4) {
+    alertType = "CRITICAL_FEEDBACK";
+    alertMessage = "Critical Feedback Received!";
+  } else if (sensorPayload.feedback === 2) {
+    alertType = "WARNING_FEEDBACK";
+    alertMessage = "Warning Feedback Received!";
+  } else if (sensorPayload.OdorSensVal > 80) {
+    alertType = "HIGH_ODOR";
+    alertMessage = "High Odor Detected!";
+  } else if (sensorPayload.Counter > 100) {
+    alertType = "HIGH_USAGE";
+    alertMessage = "High Usage Detected!";
+  }
+
+  if (alertType) {
+    const newAlert = await Alert.create({
+      device_uid: sensorPayload.device_uid,
+      alertType: alertType,
+      feedback: sensorPayload.feedback,
+      Counter: sensorPayload.Counter,
+      OdorSensVal: sensorPayload.OdorSensVal,
+      status: "OPEN"
+    });
+    console.log(`🚨 Alert Created: ${alertType} for device ${sensorPayload.device_uid}`);
+    
     global.io.emit("new_alert", {
       device_uid: sensorPayload.device_uid,
-      message: "Threshold exceeded!"
+      alert_id: newAlert._id,
+      type: alertType,
+      message: alertMessage,
+      feedback: sensorPayload.feedback
     });
   }
 }

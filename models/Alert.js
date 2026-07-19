@@ -17,7 +17,8 @@ const alertSchema = new mongoose.Schema(
         enum: [
             "HIGH_USAGE",
             "HIGH_ODOR",
-            "CRITICAL_FEEDBACK"
+            "CRITICAL_FEEDBACK",
+            "WARNING_FEEDBACK"
         ]
     },
 

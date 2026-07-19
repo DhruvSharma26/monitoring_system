@@ -18,7 +18,7 @@ const getAlerts = async (req, res) => {
 
         if (type === "attention") {
 
-            query.feedback = 3;
+            query.feedback = 2;
 
         }
 
