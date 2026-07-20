@@ -49,6 +49,7 @@ const io = new Server(server, {
 });
 global.io = io; // Make io globally accessible
 
+app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
