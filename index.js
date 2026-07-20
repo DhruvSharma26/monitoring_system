@@ -128,7 +128,7 @@ const MQTT_PASSWORD =
   process.env.MQTT_PASSWORD || "";
 
 const MQTT_TOPICS =
-  (process.env.MQTT_TOPICS || "Feedback/data")
+  (process.env.MQTT_TOPICS || "Feedback/data,FeedBack/data")
     .split(",")
     .map((t) => t.trim());
 
