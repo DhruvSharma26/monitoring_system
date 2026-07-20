@@ -214,13 +214,13 @@ function connectMQTT() {
     payload.timestamp,
 
   feedback:
-    payload.feedback,
+    payload.feedback !== undefined ? Number(payload.feedback) : undefined,
 
   Counter:
-    payload.Counter,
+    payload.Counter !== undefined ? Number(payload.Counter) : undefined,
 
   OdorSensVal:
-    payload.OdorSensVal
+    payload.OdorSensVal !== undefined ? Number(payload.OdorSensVal) : undefined
 
 };
 
