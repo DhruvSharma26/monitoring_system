@@ -2,6 +2,7 @@ const Device = require("../models/Device");
 const LatestDeviceStatus = require("../models/LatestDeviceStatus");
 const Alert = require("../models/Alert");
 const Settings = require("../models/Settings");
+const SensorData = require("../models/SensorData");
 
 // ----------------------------------------------------
 // Dashboard Summary
@@ -87,6 +88,10 @@ const getDashboard = async (req, res) => {
             { day: "Sun", rating: 4.1 }
         ];
 
+        const total_feedbacks = await SensorData.countDocuments({
+            device_uid: { $in: devices.map(d => d.device_uid) }
+        });
+
         res.status(200).json({
 
             success: true,
@@ -105,7 +110,7 @@ const getDashboard = async (req, res) => {
 
                 averageRating,
 
-                total_feedbacks: statuses.length * 15, // Mocking a higher number
+                total_feedbacks,
 
                 usage_data,
 
