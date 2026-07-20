@@ -10,10 +10,10 @@ const Settings = require("../models/Settings");
 const getDashboard = async (req, res) => {
     try {
 
-        const [totalToilets, statuses, liveAlerts] =
+        const [devices, statuses, liveAlerts] =
             await Promise.all([
 
-                Device.countDocuments(),
+                Device.find().lean(),
 
                 LatestDeviceStatus.find().lean(),
 
@@ -28,56 +28,41 @@ const getDashboard = async (req, res) => {
 
             ]);
 
+        const totalToilets = devices.length;
+
         let clean = 0;
         let attention = 0;
         let critical = 0;
         let totalRating = 0;
 
+        const statusMap = {};
         statuses.forEach(item => {
+            statusMap[item.device_uid] = item;
+        });
 
-            if (
-                item.feedback === 0 ||
-                item.feedback === 1
-            ) {
+        devices.forEach(device => {
+            const item = statusMap[device.device_uid];
+
+            if (!item || item.feedback === 0 || item.feedback === 1) {
                 clean++;
-            }
-
-            else if (
-                item.feedback === 2
-            ) {
+                totalRating += 5;
+            } else if (item.feedback === 2) {
                 attention++;
-            }
-
-            else if (
-                item.feedback === 4
-            ) {
+                totalRating += 2;
+            } else if (item.feedback === 4) {
                 critical++;
+                totalRating += 1;
+            } else {
+                clean++;
+                totalRating += 5;
             }
-
-            switch (item.feedback) {
-
-                case 0:
-                case 1:
-                    totalRating += 5;
-                    break;
-
-                case 2:
-                    totalRating += 2;
-                    break;
-
-                case 4:
-                    totalRating += 1;
-                    break;
-
-            }
-
         });
 
         const averageRating =
-            statuses.length > 0
+            devices.length > 0
                 ? (
                     totalRating /
-                    statuses.length
+                    devices.length
                 ).toFixed(1)
                 : 0;
 

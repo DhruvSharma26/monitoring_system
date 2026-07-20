@@ -36,10 +36,7 @@ const getToilets = async (req, res) => {
             const latestStatus =
                 statusMap[
                     device.device_uid
-                ];
-
-            if (!latestStatus)
-                continue;
+                ] || {};
 
             let toiletStatus =
                 "CLEAN";
@@ -64,6 +61,7 @@ const getToilets = async (req, res) => {
 
             if (
                 status &&
+                status.toLowerCase() !== "all" &&
                 toiletStatus.toLowerCase() !==
                 status.toLowerCase()
             ) {
@@ -119,7 +117,7 @@ const getToilets = async (req, res) => {
                     latestStatus.Counter || 0,
 
                 feedback:
-                    latestStatus.feedback,
+                    latestStatus.feedback || 0,
 
                 Counter:
                     latestStatus.Counter || 0,
@@ -134,7 +132,7 @@ const getToilets = async (req, res) => {
                     device.longitude,
 
                 timestamp:
-                    latestStatus.timestamp
+                    latestStatus.timestamp || device.createdAt
 
             });
 
