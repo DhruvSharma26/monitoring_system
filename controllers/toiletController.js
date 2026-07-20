@@ -79,7 +79,7 @@ const getToiletDetails = async (req, res) => {
         if (latestStatus) {
 
             if (
-                latestStatus.feedback === 2
+                latestStatus.feedback === 3
             ) {
 
                 status =

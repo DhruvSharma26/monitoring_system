@@ -258,7 +258,7 @@ if (global.io) {
   if (sensorPayload.feedback === 4) {
     alertType = "CRITICAL_FEEDBACK";
     alertMessage = "Critical Feedback Received!";
-  } else if (sensorPayload.feedback === 2) {
+  } else if (sensorPayload.feedback === 3) {
     alertType = "WARNING_FEEDBACK";
     alertMessage = "Warning Feedback Received!";
   } else if (sensorPayload.OdorSensVal > 80) {

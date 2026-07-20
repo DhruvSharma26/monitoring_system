@@ -44,10 +44,10 @@ const getDashboard = async (req, res) => {
         devices.forEach(device => {
             const item = statusMap[device.device_uid];
 
-            if (!item || item.feedback === 0 || item.feedback === 1) {
+            if (!item || item.feedback === 1 || item.feedback === 2) {
                 clean++;
                 totalRating += 5;
-            } else if (item.feedback === 2) {
+            } else if (item.feedback === 3) {
                 attention++;
                 totalRating += 2;
             } else if (item.feedback === 4) {
@@ -179,12 +179,12 @@ const getMapData = async (req, res) => {
                         statusData.feedback
                     ) {
 
-                        case 0:
                         case 1:
+                        case 2:
                             status = "clean";
                             break;
 
-                        case 2:
+                        case 3:
                             status = "attention";
                             break;
 
@@ -297,6 +297,15 @@ const getLiveAlerts = async (req, res) => {
 
                 alertType =
                     "CRITICAL_FEEDBACK";
+
+            }
+
+            else if (
+                status.feedback === 3
+            ) {
+
+                alertType =
+                    "WARNING_FEEDBACK";
 
             }
 
@@ -419,7 +428,7 @@ const getAttentionCriticalToilets =
                     continue;
 
                 if (
-                    status.feedback === 2 ||
+                    status.feedback === 3 ||
                     status.feedback === 4
                 ) {
 
@@ -447,7 +456,7 @@ const getAttentionCriticalToilets =
                             status.feedback,
 
                         status:
-                            status.feedback === 2
+                            status.feedback === 3
                                 ? "ATTENTION"
                                 : "CRITICAL",
 
