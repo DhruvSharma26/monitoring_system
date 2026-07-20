@@ -222,9 +222,27 @@ const refresh = async (req, res, next) => {
 
 const logout = async (req, res, next) => {
     try {
-        const userId = req.user.id;
-        await User.findByIdAndUpdate(userId, { refreshToken: null });
+        const user = await User.findById(req.user.id);
+        if (user) {
+            user.refreshToken = null;
+            await user.save();
+        }
         res.status(200).json({ success: true, message: "Logged out" });
+    } catch (error) {
+        next(error);
+    }
+};
+
+const getMe = async (req, res, next) => {
+    try {
+        const user = await User.findById(req.user.id).select("-password -refreshToken");
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+        res.status(200).json({
+            success: true,
+            user
+        });
     } catch (error) {
         next(error);
     }
@@ -234,5 +252,6 @@ module.exports = {
     registerAdmin,
     login,
     refresh,
-    logout
+    logout,
+    getMe
 };
