@@ -46,13 +46,13 @@ const registerStaff = async (req, res) => {
             .padStart(3, "0");
 
         const device =
-            await Device.findById(deviceId);
+            await Device.findOne({ _id: deviceId, adminId: req.user.id });
 
         if (!device) {
 
             return res.status(404).json({
                 success: false,
-                message: "Device not found"
+                message: "Device not found or not authorized"
             });
 
         }

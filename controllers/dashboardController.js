@@ -13,7 +13,7 @@ const getDashboard = async (req, res) => {
         const [devices, statuses, liveAlerts] =
             await Promise.all([
 
-                Device.find().lean(),
+                Device.find({ adminId: req.user.id }).lean(),
 
                 LatestDeviceStatus.find().lean(),
 
@@ -140,7 +140,7 @@ const getMapData = async (req, res) => {
         const [devices, statuses] =
             await Promise.all([
 
-                Device.find().lean(),
+                Device.find({ adminId: req.user.id }).lean(),
 
                 LatestDeviceStatus
                     .find()
@@ -254,7 +254,7 @@ const getLiveAlerts = async (req, res) => {
         const [devices, statuses] =
             await Promise.all([
 
-                Device.find().lean(),
+                Device.find({ adminId: req.user.id }).lean(),
 
                 LatestDeviceStatus
                     .find()
@@ -383,7 +383,7 @@ const getAttentionCriticalToilets =
             const [devices, statuses] =
                 await Promise.all([
 
-                    Device.find().lean(),
+                    Device.find({ adminId: req.user.id }).lean(),
 
                     LatestDeviceStatus
                         .find()

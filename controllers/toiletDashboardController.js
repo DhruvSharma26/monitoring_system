@@ -11,7 +11,7 @@ const getToilets = async (req, res) => {
         const [devices, statuses] =
             await Promise.all([
 
-                Device.find().lean(),
+                Device.find({ adminId: req.user.id }).lean(),
 
                 LatestDeviceStatus
                     .find()

@@ -79,7 +79,7 @@ const getDevices = async (req, res) => {
     try {
 
         const devices =
-            await Device.find();
+            await Device.find({ adminId: req.user.id });
 
         res.status(200).json({
             success: true,
