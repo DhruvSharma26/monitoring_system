@@ -202,27 +202,24 @@ function connectMQTT() {
           };
         }
 
+        const du = payload.device_uid ?? payload.deviceId ?? payload.device_id;
+        const f = payload.feedback ?? payload.FeedBack ?? payload.Feedback ?? payload.feedBack;
+        const c = payload.Counter ?? payload.counter;
+        const o = payload.OdorSensVal ?? payload.odorSensVal ?? payload.odor ?? payload.Odor;
+        
+        if (!du) {
+          console.log("⚠️ Missing device identifier in payload:", raw);
+          return; // Don't process if we don't know the device
+        }
+
         const sensorPayload = {
-
-  device_uid:
-    payload.device_uid,
-
-  user_id:
-    payload.user_id,
-
-  timestamp:
-    payload.timestamp,
-
-  feedback:
-    payload.feedback !== undefined ? Number(payload.feedback) : undefined,
-
-  Counter:
-    payload.Counter !== undefined ? Number(payload.Counter) : undefined,
-
-  OdorSensVal:
-    payload.OdorSensVal !== undefined ? Number(payload.OdorSensVal) : undefined
-
-};
+          device_uid: du,
+          user_id: payload.user_id ?? payload.userId,
+          timestamp: payload.timestamp ?? new Date(),
+          feedback: f !== undefined ? Number(f) : undefined,
+          Counter: c !== undefined ? Number(c) : undefined,
+          OdorSensVal: o !== undefined ? Number(o) : undefined
+        };
 
 // Save historical data
 await SensorData.create(
@@ -233,7 +230,7 @@ await SensorData.create(
 await LatestDeviceStatus.findOneAndUpdate(
 {
   device_uid:
-    payload.device_uid
+    du
 },
 {
   $set: sensorPayload

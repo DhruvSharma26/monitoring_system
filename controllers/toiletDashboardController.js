@@ -38,25 +38,12 @@ const getToilets = async (req, res) => {
                     device.device_uid
                 ] || {};
 
-            let toiletStatus =
-                "CLEAN";
-
-            if (
-                latestStatus.feedback === 3
-            ) {
-
-                toiletStatus =
-                    "ATTENTION";
-
+            let toiletStatus = "clean";
+            if (latestStatus.feedback === 3) {
+                toiletStatus = "warning";
             }
-
-            else if (
-                latestStatus.feedback === 4
-            ) {
-
-                toiletStatus =
-                    "CRITICAL";
-
+            else if (latestStatus.feedback === 4) {
+                toiletStatus = "critical";
             }
 
             if (

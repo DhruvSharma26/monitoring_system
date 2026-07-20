@@ -74,28 +74,14 @@ const getToiletDetails = async (req, res) => {
 
         ]);
 
-        let status = "CLEAN";
-
+        let status = "clean";
         if (latestStatus) {
-
-            if (
-                latestStatus.feedback === 3
-            ) {
-
-                status =
-                    "ATTENTION";
-
+            if (latestStatus.feedback === 3) {
+                status = "warning";
             }
-
-            else if (
-                latestStatus.feedback === 4
-            ) {
-
-                status =
-                    "CRITICAL";
-
+            else if (latestStatus.feedback === 4) {
+                status = "critical";
             }
-
         }
 
         res.status(200).json({
