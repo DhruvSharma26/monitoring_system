@@ -177,7 +177,13 @@ const login = async (req, res, next) => {
             token,
             refreshToken,
             role: user.role,
-            userId: user.userId
+            userId: user.userId,
+            email: user.email,
+            id: user._id,
+            companyName: user.companyName,
+            contactPerson: user.contactPerson,
+            designation: user.designation,
+            mobile: user.mobile
         });
 
     } catch (error) {
