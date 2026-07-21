@@ -25,6 +25,7 @@ require("./routes/settingsRoutes");
 const SensorData = require("./models/SensorData");
 const LatestDeviceStatus = require("./models/LatestDeviceStatus");
 const Alert = require("./models/Alert");
+const Settings = require("./models/Settings");
 const dashboardRoutes =
 require("./routes/dashboardRoutes");
 const taskRoutes =
@@ -206,8 +207,8 @@ function connectMQTT() {
 
         const du = payload.device_uid ?? payload.deviceId ?? payload.device_id;
         const f = payload.feedback ?? payload.FeedBack ?? payload.Feedback ?? payload.feedBack;
-        const c = payload.Counter ?? payload.counter;
-        const o = payload.OdorSensVal ?? payload.odorSensVal ?? payload.odor ?? payload.Odor;
+        const c = payload.Counter ?? payload.counter ?? payload.CounterValue;
+        const o = payload.OdorSensVal ?? payload.odorSensVal ?? payload.odor ?? payload.Odor ?? payload.OdorLevel;
         
         if (!du) {
           console.log("⚠️ Missing device identifier in payload:", raw);
@@ -251,21 +252,23 @@ console.log(
 if (global.io) {
   global.io.emit("device_status_update", sensorPayload);
   
+  const settings = await Settings.findOne() || { counterThreshold: 100, odorThreshold: 80 };
+  
   let alertType = null;
   let alertMessage = "";
 
   if (sensorPayload.feedback === 4) {
     alertType = "CRITICAL_FEEDBACK";
-    alertMessage = "Critical Feedback Received!";
+    alertMessage = "Critical";
   } else if (sensorPayload.feedback === 3) {
     alertType = "WARNING_FEEDBACK";
-    alertMessage = "Warning Feedback Received!";
-  } else if (sensorPayload.OdorSensVal > 80) {
+    alertMessage = "Needs Attention";
+  } else if (sensorPayload.OdorSensVal > settings.odorThreshold) {
     alertType = "HIGH_ODOR";
-    alertMessage = "High Odor Detected!";
-  } else if (sensorPayload.Counter > 100) {
+    alertMessage = "High Odor Value";
+  } else if (sensorPayload.Counter > settings.counterThreshold) {
     alertType = "HIGH_USAGE";
-    alertMessage = "High Usage Detected!";
+    alertMessage = "High Counter Value";
   }
 
   if (alertType) {

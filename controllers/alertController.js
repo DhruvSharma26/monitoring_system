@@ -1,6 +1,8 @@
 const Alert = require("../models/Alert");
 const Device = require("../models/Device");
 const SensorData = require("../models/SensorData");
+const User = require("../models/User");
+const Task = require("../models/Task");
 
 const getAlerts = async (req, res) => {
 
@@ -153,6 +155,19 @@ const assignAlert = async (req, res) => {
         const alert = await Alert.findById(alertId);
         if (!alert) return res.status(404).json({ success: false, message: "Alert not found" });
         
+        const staff = await User.findOne({ userId: staff_id, role: "staff" });
+        if (!staff) return res.status(404).json({ success: false, message: "Staff not found" });
+
+        const device = await Device.findOne({ device_uid: alert.device_uid });
+        
+        await Task.create({
+            alert: alert._id,
+            device: device ? device._id : null,
+            staff: staff._id,
+            assignedBy: req.user.id,
+            status: "ASSIGNED"
+        });
+
         alert.status = "ASSIGNED";
         await alert.save();
         
