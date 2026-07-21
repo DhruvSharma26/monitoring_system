@@ -155,7 +155,10 @@ const assignAlert = async (req, res) => {
         const alert = await Alert.findById(alertId);
         if (!alert) return res.status(404).json({ success: false, message: "Alert not found" });
         
-        const staff = await User.findOne({ userId: staff_id, role: "staff" });
+        const staff = await User.findOne({ 
+            $or: [{ userId: staff_id }, { empId: staff_id }], 
+            role: "staff" 
+        });
         if (!staff) return res.status(404).json({ success: false, message: "Staff not found" });
 
         const device = await Device.findOne({ device_uid: alert.device_uid });

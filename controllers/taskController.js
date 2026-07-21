@@ -11,11 +11,10 @@ const assignTask = async (req, res) => {
             deviceId
         } = req.body;
 
-        const staff =
-            await User.findOne({
-                userId: staffId,
-                role: "staff"
-            });
+        const staff = await User.findOne({
+            $or: [{ userId: staffId }, { empId: staffId }],
+            role: "staff"
+        });
 
         if (!staff) {
 

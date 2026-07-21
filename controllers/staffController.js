@@ -99,14 +99,13 @@ const registerStaff = async (req, res) => {
 const getStaff = async (req, res) => {
 
     try {
+        const myDevices = await Device.find({ adminId: req.user.id }).select("_id");
+        const myDeviceIds = myDevices.map(d => d._id);
 
-        const staff =
-            await User.find({
-                role: "staff"
-            })
-            .populate(
-                "assignedDevice"
-            );
+        const staff = await User.find({
+            role: "staff",
+            assignedDevice: { $in: myDeviceIds }
+        }).populate("assignedDevice");
 
         res.status(200).json({
             success: true,
