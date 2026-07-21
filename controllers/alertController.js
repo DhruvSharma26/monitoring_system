@@ -43,6 +43,7 @@ const getAlerts = async (req, res) => {
                     const task = await Task.findOne({ alert: alerts[i]._id }).populate("staff", "name");
                     if (task && task.staff) {
                         alerts[i].assignedStaffName = task.staff.name;
+                        alerts[i].taskId = task._id;
                     }
                 }
                 latestAlerts.push(alerts[i]);
