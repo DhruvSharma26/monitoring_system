@@ -24,11 +24,21 @@ const getAlerts = async (req, res) => {
 
         }
 
-        const alerts =
-        await Alert.find(query)
-        .sort({
-            createdAt: -1
-        });
+        // Filter alerts by admin's devices
+        const myDevices = await Device.find({ adminId: req.user.id }).select("device_uid");
+        const myDeviceUids = myDevices.map(d => d.device_uid);
+        query.device_uid = { $in: myDeviceUids };
+
+        const alerts = await Alert.find(query).sort({ createdAt: -1 }).lean();
+
+        for (let i = 0; i < alerts.length; i++) {
+            if (alerts[i].status === "ASSIGNED") {
+                const task = await Task.findOne({ alert: alerts[i]._id }).populate("staff", "name");
+                if (task && task.staff) {
+                    alerts[i].assignedStaffName = task.staff.name;
+                }
+            }
+        }
 
         res.status(200).json({
             success: true,
