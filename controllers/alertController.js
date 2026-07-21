@@ -31,19 +31,28 @@ const getAlerts = async (req, res) => {
 
         const alerts = await Alert.find(query).sort({ createdAt: -1 }).lean();
 
+        const seenDevices = new Set();
+        const latestAlerts = [];
+
         for (let i = 0; i < alerts.length; i++) {
-            if (alerts[i].status === "ASSIGNED") {
-                const task = await Task.findOne({ alert: alerts[i]._id }).populate("staff", "name");
-                if (task && task.staff) {
-                    alerts[i].assignedStaffName = task.staff.name;
+            // Only keep the most recent alert per device
+            if (!seenDevices.has(alerts[i].device_uid)) {
+                seenDevices.add(alerts[i].device_uid);
+                
+                if (alerts[i].status === "ASSIGNED") {
+                    const task = await Task.findOne({ alert: alerts[i]._id }).populate("staff", "name");
+                    if (task && task.staff) {
+                        alerts[i].assignedStaffName = task.staff.name;
+                    }
                 }
+                latestAlerts.push(alerts[i]);
             }
         }
 
         res.status(200).json({
             success: true,
-            count: alerts.length,
-            alerts
+            count: latestAlerts.length,
+            alerts: latestAlerts
         });
 
     } catch (error) {
