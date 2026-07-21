@@ -144,8 +144,10 @@ function connectMQTT() {
       Math.random().toString(16).slice(2, 8),
 
     clean: true,
-
     reconnectPeriod: 3000,
+    connectTimeout: 30000,
+    rejectUnauthorized: false, // Prevents TLS issues on hosted environments
+    protocolVersion: 4, // Explicitly use MQTT 3.1.1
   };
 
   if (MQTT_USERNAME) {
