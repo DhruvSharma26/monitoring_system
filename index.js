@@ -40,6 +40,8 @@ const alertRoutes =
 require("./routes/alertRoutes");
 const reportRoutes =
 require("./routes/reportRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
+const notificationService = require("./services/notificationService");
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -54,6 +56,8 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
+const path = require("path");
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 connectDB();
 
 app.use(helmet());
@@ -108,6 +112,7 @@ app.use(
     reportRoutes
 );
 app.use("/api/otp", otpRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 app.get("/", (req, res) => {
   res.send("Toilet Monitoring Backend Running");
@@ -289,6 +294,9 @@ if (global.io) {
       message: alertMessage,
       feedback: sensorPayload.feedback
     });
+
+    // Send notifications to Admin and Assigned Staff (FCM Push, DB, Socket, Email)
+    notificationService.handleMqttAlertNotification(sensorPayload, alertType, newAlert);
   }
 }
 

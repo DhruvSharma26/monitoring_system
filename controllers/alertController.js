@@ -183,7 +183,7 @@ const assignAlert = async (req, res) => {
 
         const device = await Device.findOne({ device_uid: alert.device_uid });
         
-        await Task.create({
+        const task = await Task.create({
             alert: alert._id,
             device: device ? device._id : null,
             staff: staff._id,
@@ -194,6 +194,10 @@ const assignAlert = async (req, res) => {
         alert.status = "ASSIGNED";
         await alert.save();
         
+        // Notify assigned staff
+        const notificationService = require("../services/notificationService");
+        notificationService.sendTaskAssignedNotification(task, staff, req.user, device);
+
         res.status(200).json({ success: true, message: "Alert assigned" });
     } catch (error) {
         console.log(error);

@@ -15,10 +15,12 @@
     "express-mongo-sanitize": "^2.2.0",
     "express-rate-limit": "^8.5.2",
     "express-validator": "^7.3.2",
+    "firebase-admin": "^14.2.0",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.4.0",
     "mqtt": "^5.15.1",
+    "multer": "^2.2.0",
     "nodemailer": "^8.0.10",
     "otp-generator": "^4.0.1",
     "socket.io": "^4.8.3"

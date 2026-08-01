@@ -40,6 +40,10 @@ const taskSchema = new mongoose.Schema(
     est_time: { type: String, default: "15 mins" },
     distance: { type: String, default: "50m" },
     due_time: { type: String, default: "ASAP" },
+    assignedAt: { type: Date, default: Date.now },
+    startedAt: Date,
+    photosUploadedAt: Date,
+    submittedAt: Date,
     completedAt: Date,
     durationMins: Number,
     rating: Number,
@@ -48,8 +52,19 @@ const taskSchema = new mongoose.Schema(
     
     beforeCleaningPhoto: String,
     afterCleaningPhoto: String,
+    cleaningPhotos: [{
+        url: String,
+        uploadedAt: { type: Date, default: Date.now }
+    }],
     adminRemarks: String,
-    verifiedAt: Date
+    verifiedAt: Date,
+
+    timeline: [{
+        status: String,
+        timestamp: { type: Date, default: Date.now },
+        updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        notes: String
+    }]
 },
 {
     timestamps: true

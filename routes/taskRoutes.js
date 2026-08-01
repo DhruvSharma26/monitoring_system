@@ -1,70 +1,51 @@
 const express = require("express");
-
 const router = express.Router();
-
-const authMiddleware =
-require("../middleware/authMiddleware");
+const authMiddleware = require("../middleware/authMiddleware");
+const { upload } = require("../services/storageService");
 
 const {
-
     assignTask,
-
     getMyTasks,
-
-    submitTask,
-
-    verifyTask,
-    
+    getAllTasksForAdmin,
+    getTaskTimeline,
     startTask,
-    
+    uploadTaskPhotos,
+    submitTask,
+    verifyTask,
     completeTask,
-    
     updateTaskProgress
+} = require("../controllers/taskController");
 
-} = require(
-    "../controllers/taskController"
-);
+// All routes require auth
+router.use(authMiddleware);
 
-router.post(
-    "/assign",
-    authMiddleware,
-    assignTask
-);
+// Admin Assign Task
+router.post("/assign", assignTask);
 
-router.get(
-    "/my-tasks",
-    authMiddleware,
-    getMyTasks
-);
+// Staff Get My Tasks
+router.get("/my-tasks", getMyTasks);
 
-router.post(
-    "/submit",
-    authMiddleware,
-    submitTask
-);
+// Admin Get All Tasks & Live Progress
+router.get("/all", getAllTasksForAdmin);
 
-router.post(
-    "/verify",
-    authMiddleware,
-    verifyTask
-);
+// Get Task Audit Timeline
+router.get("/:taskId/timeline", getTaskTimeline);
 
-router.post(
-    "/:taskId/start",
-    authMiddleware,
-    startTask
-);
+// Staff Start Task
+router.post("/:taskId/start", startTask);
 
-router.post(
-    "/:taskId/complete",
-    authMiddleware,
-    completeTask
-);
+// Staff Upload Cleaning Photos (Accepts array of 3 to 5 images)
+router.post("/:taskId/upload-photos", upload.array("photos", 5), uploadTaskPhotos);
 
-router.patch(
-    "/:taskId/progress",
-    authMiddleware,
-    updateTaskProgress
-);
+// Staff Submit Task (Requires >= 10 mins elapsed)
+router.post("/submit", submitTask);
+router.post("/:taskId/submit", submitTask);
+
+// Admin Verify Task
+router.post("/verify", verifyTask);
+router.post("/:taskId/verify", verifyTask);
+
+router.post("/:taskId/complete", completeTask);
+router.patch("/:taskId/progress", updateTaskProgress);
 
 module.exports = router;

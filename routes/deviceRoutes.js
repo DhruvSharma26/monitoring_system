@@ -1,32 +1,20 @@
 const express = require("express");
-
 const router = express.Router();
 
-const authMiddleware =
-    require("../middleware/authMiddleware");
-
+const authMiddleware = require("../middleware/authMiddleware");
 const {
     registerDevice,
     getDevices,
-    getDeviceById
+    getDeviceById,
+    geocodeLocation
 } = require("../controllers/deviceController");
 
-router.post(
-    "/",
-    authMiddleware,
-    registerDevice
-);
+router.get("/geocode", authMiddleware, geocodeLocation);
 
-router.get(
-    "/",
-    authMiddleware,
-    getDevices
-);
+router.post("/", authMiddleware, registerDevice);
 
-router.get(
-    "/:id",
-    authMiddleware,
-    getDeviceById
-);
+router.get("/", authMiddleware, getDevices);
+
+router.get("/:id", authMiddleware, getDeviceById);
 
 module.exports = router;
