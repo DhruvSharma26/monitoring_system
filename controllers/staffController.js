@@ -1,5 +1,6 @@
 const User = require("../models/User");
 const Device = require("../models/Device");
+const Otp = require("../models/Otp");
 const bcrypt = require("bcryptjs");
 
 const registerStaff = async (req, res) => {
@@ -7,14 +8,22 @@ const registerStaff = async (req, res) => {
     try {
 
         const {
-    name,
-    email,
-    mobile,
-    empId,
-    designation,
-    deviceId,
-    password
-} = req.body;
+            name,
+            email,
+            mobile,
+            empId,
+            designation,
+            deviceId,
+            password
+        } = req.body;
+
+        const verifiedOtp = await Otp.findOne({ email, verified: true });
+        if (!verifiedOtp) {
+            return res.status(400).json({
+                success: false,
+                message: "Staff email address must be verified via OTP first."
+            });
+        }
 
         const existingStaff =
             await User.findOne({ empId });

@@ -14,49 +14,17 @@ const {
     getMonthlyReport,
     
     getReportStats,
-    
     getReportsList,
-    
-    generateReport
+    generateReport,
+    getDeviceReports
+} = require("../controllers/reportController");
 
-} = require(
-    "../controllers/reportController"
-);
-
-router.get(
-    "/daily",
-    authMiddleware,
-    getDailyReport
-);
-
-router.get(
-    "/weekly",
-    authMiddleware,
-    getWeeklyReport
-);
-
-router.get(
-    "/monthly",
-    authMiddleware,
-    getMonthlyReport
-);
-
-router.get(
-    "/stats",
-    authMiddleware,
-    getReportStats
-);
-
-router.get(
-    "/",
-    authMiddleware,
-    getReportsList
-);
-
-router.post(
-    "/generate",
-    authMiddleware,
-    generateReport
-);
+router.get("/daily", authMiddleware, getDailyReport);
+router.get("/weekly", authMiddleware, getWeeklyReport);
+router.get("/monthly", authMiddleware, getMonthlyReport);
+router.get("/stats", authMiddleware, getReportStats);
+router.get("/device-reports", authMiddleware, getDeviceReports);
+router.get("/", authMiddleware, getReportsList);
+router.post("/generate", authMiddleware, generateReport);
 
 module.exports = router;

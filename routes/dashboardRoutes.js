@@ -9,7 +9,8 @@ const {
     getDashboard,
     getMapData,
     getLiveAlerts,
-    getAttentionCriticalToilets
+    getAttentionCriticalToilets,
+    getToiletRatingComparison
 } = require(
     "../controllers/dashboardController"
 );
@@ -35,5 +36,10 @@ router.get(
     "/attention-critical",
     authMiddleware,
     getAttentionCriticalToilets
+);
+router.get(
+    "/toilet-rating-analysis",
+    authMiddleware,
+    getToiletRatingComparison
 );
 module.exports = router;

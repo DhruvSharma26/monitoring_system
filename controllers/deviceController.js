@@ -1,4 +1,6 @@
 const Device = require("../models/Device");
+const User = require("../models/User");
+const LatestDeviceStatus = require("../models/LatestDeviceStatus");
 const googleMapsService = require("../services/googleMapsService");
 
 const registerDevice = async (req, res) => {
@@ -20,17 +22,14 @@ const registerDevice = async (req, res) => {
             floor
         });
 
-        const deviceId =
-            location.replace(/\s/g, "") +
-            "-" +
-            floor +
-            "-" +
-            String(count + 1).padStart(2, "0");
+        const cleanLoc = (location || "DEV").replace(/[^a-zA-Z0-9]/g, "");
+        const cleanFloor = (floor || "F1").replace(/\s/g, "");
+        const deviceId = `${cleanLoc}-${cleanFloor}-${String(count + 1).padStart(2, "0")}`;
 
         let resolvedLat = latitude !== undefined && latitude !== null ? Number(latitude) : undefined;
         let resolvedLng = longitude !== undefined && longitude !== null ? Number(longitude) : undefined;
 
-        // Auto-geocode location via Google Maps API if coordinates were not supplied
+        // Auto-geocode location via Google Maps API to fetch real geographical coordinates if not provided
         if ((resolvedLat === undefined || resolvedLng === undefined) && location) {
             const geocoded = await googleMapsService.geocodeAddress(location);
             if (geocoded) {
@@ -47,7 +46,7 @@ const registerDevice = async (req, res) => {
             deviceModelNumber,
             location,
             floor,
-            tabLocation,
+            tabLocation: tabLocation || location,
             latitude: resolvedLat,
             longitude: resolvedLng,
             installationDate
@@ -139,9 +138,48 @@ const geocodeLocation = async (req, res) => {
     }
 };
 
+const deleteDevice = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const device = await Device.findOne({
+            $or: [{ _id: id }, { deviceId: id }],
+            adminId: req.user.id
+        });
+
+        if (!device) {
+            return res.status(404).json({
+                success: false,
+                message: "Device not found or unauthorized"
+            });
+        }
+
+        // Unassign staff associated with device
+        await User.updateMany(
+            { assignedDevice: device._id },
+            { $unset: { assignedDevice: 1 } }
+        );
+
+        // Delete latest status and device
+        await LatestDeviceStatus.deleteMany({ device_uid: device.device_uid });
+        await Device.findByIdAndDelete(device._id);
+
+        res.status(200).json({
+            success: true,
+            message: "Device removed successfully"
+        });
+    } catch (error) {
+        console.error("Error in deleteDevice:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server Error"
+        });
+    }
+};
+
 module.exports = {
     registerDevice,
     getDevices,
     getDeviceById,
-    geocodeLocation
+    geocodeLocation,
+    deleteDevice
 };

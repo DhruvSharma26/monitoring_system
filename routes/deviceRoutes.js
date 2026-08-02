@@ -6,7 +6,8 @@ const {
     registerDevice,
     getDevices,
     getDeviceById,
-    geocodeLocation
+    geocodeLocation,
+    deleteDevice
 } = require("../controllers/deviceController");
 
 router.get("/geocode", authMiddleware, geocodeLocation);
@@ -16,5 +17,7 @@ router.post("/", authMiddleware, registerDevice);
 router.get("/", authMiddleware, getDevices);
 
 router.get("/:id", authMiddleware, getDeviceById);
+
+router.delete("/:id", authMiddleware, deleteDevice);
 
 module.exports = router;
