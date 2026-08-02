@@ -487,7 +487,7 @@ const downloadReportPdf = async (req, res) => {
                 const dateStr = d.toISOString().split("T")[0];
 
                 doc.fillColor("#444444").fontSize(10).text(
-                    `${dateStr} (${dayLabel}) - Rating: 4.${(i * 3) % 9 + 1}★ | Odor: ${20 + i * 4} PPM | Usages: ${30 + i * 5} | Feedbacks: ${5 + i}`
+                    `${dateStr} (${dayLabel}) - Rating: 4.${(i * 3) % 9 + 1} / 5.0 | Odor: ${20 + i * 4} PPM | Usages: ${30 + i * 5} | Feedbacks: ${5 + i}`
                 );
             }
         }
