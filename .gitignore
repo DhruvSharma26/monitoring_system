@@ -7,3 +7,4 @@ package-lock.json
 # OS files
 .DS_Store
 Thumbs.db
+config/firebase-service-account.json

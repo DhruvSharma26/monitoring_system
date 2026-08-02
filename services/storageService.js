@@ -29,8 +29,44 @@ const imageFileFilter = (req, file, cb) => {
     }
 };
 
+let storageEngine = diskStorage;
+
+if (process.env.STORAGE_PROVIDER === "s3") {
+    try {
+        const { S3Client } = require("@aws-sdk/client-s3");
+        const multerS3 = require("multer-s3");
+
+        const s3Client = new S3Client({
+            region: process.env.AWS_REGION || "ap-south-1",
+            credentials: {
+                accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+                secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+            }
+        });
+
+        storageEngine = multerS3({
+            s3: s3Client,
+            bucket: process.env.AWS_BUCKET_NAME || "sinexus-image-bucket",
+            contentType: multerS3.AUTO_CONTENT_TYPE,
+            metadata: (req, file, cb) => {
+                cb(null, { fieldName: file.fieldname });
+            },
+            key: (req, file, cb) => {
+                const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+                const ext = path.extname(file.originalname) || ".jpg";
+                cb(null, `task-photos/photo-${uniqueSuffix}${ext}`);
+            }
+        });
+        console.log("🌲 Storage Service: AWS S3 storage engine initialized.");
+    } catch (err) {
+        console.error("❌ Storage Service S3 Initialization Error:", err.message);
+        console.log("⚠️ Storage Service: Falling back to local disk storage.");
+        storageEngine = diskStorage;
+    }
+}
+
 const upload = multer({
-    storage: diskStorage,
+    storage: storageEngine,
     fileFilter: imageFileFilter,
     limits: {
         fileSize: 10 * 1024 * 1024 // 10 MB per image

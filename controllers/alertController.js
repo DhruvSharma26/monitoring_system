@@ -44,6 +44,9 @@ const getAlerts = async (req, res) => {
                     if (task && task.staff) {
                         alerts[i].assignedStaffName = task.staff.name;
                         alerts[i].taskId = task._id;
+                        alerts[i].taskStatus = task.status;
+                        alerts[i].taskProgressPercent = task.progressPercent || 0;
+                        alerts[i].taskCleaningPhotos = (task.cleaningPhotos || []).map(p => p.url);
                     }
                 }
                 latestAlerts.push(alerts[i]);

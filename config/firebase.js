@@ -1,4 +1,6 @@
 const admin = require("firebase-admin");
+const { initializeApp, cert, getApps } = require("firebase-admin/app");
+const { getMessaging } = require("firebase-admin/messaging");
 const fs = require("fs");
 const path = require("path");
 
@@ -6,7 +8,7 @@ let isInitialized = false;
 
 function initFirebase() {
     try {
-        if (admin && Array.isArray(admin.apps) && admin.apps.length > 0) {
+        if (getApps().length > 0) {
             isInitialized = true;
             return;
         }
@@ -17,7 +19,7 @@ function initFirebase() {
         if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
             try {
                 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-                credential = admin.credential.cert(serviceAccount);
+                credential = cert(serviceAccount);
             } catch (e) {
                 console.log("⚠️ Could not parse FIREBASE_SERVICE_ACCOUNT_JSON:", e.message);
             }
@@ -26,7 +28,7 @@ function initFirebase() {
         // 2. Check for individual environment variables
         if (!credential && process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
             const privateKey = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n");
-            credential = admin.credential.cert({
+            credential = cert({
                 projectId: process.env.FIREBASE_PROJECT_ID,
                 clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
                 privateKey: privateKey
@@ -40,15 +42,15 @@ function initFirebase() {
             
             if (fs.existsSync(localPath)) {
                 const serviceAccount = require(localPath);
-                credential = admin.credential.cert(serviceAccount);
+                credential = cert(serviceAccount);
             } else if (fs.existsSync(rootPath)) {
                 const serviceAccount = require(rootPath);
-                credential = admin.credential.cert(serviceAccount);
+                credential = cert(serviceAccount);
             }
         }
 
         if (credential) {
-            admin.initializeApp({
+            initializeApp({
                 credential: credential
             });
             isInitialized = true;
@@ -74,12 +76,12 @@ initFirebase();
  * @param {Object} [params.data] - Additional payload data
  */
 async function sendPushNotification({ tokens, title, body, data = {} }) {
-    if (!isInitialized || !admin || !Array.isArray(admin.apps) || admin.apps.length === 0) {
+    if (!isInitialized || getApps().length === 0) {
         // Try initializing once more in case env vars were set at runtime
         initFirebase();
     }
 
-    if (!isInitialized || !admin || !Array.isArray(admin.apps) || admin.apps.length === 0) {
+    if (!isInitialized || getApps().length === 0) {
         console.log(`[FCM Pending] Push notification skipped for "${title}" - Firebase credentials not provided yet.`);
         return { success: false, message: "Firebase credentials not provided" };
     }
@@ -108,7 +110,7 @@ async function sendPushNotification({ tokens, title, body, data = {} }) {
             tokens: tokenList
         };
 
-        const response = await admin.messaging().sendEachForMulticast(messagePayload);
+        const response = await getMessaging().sendEachForMulticast(messagePayload);
         console.log(`🚀 FCM Push sent! Success: ${response.successCount}, Failures: ${response.failureCount}`);
         return { success: true, response };
     } catch (error) {
