@@ -206,7 +206,111 @@ async function sendTaskAssignedNotification(taskDoc, staffUser, adminUser, devic
     }
 }
 
+async function sendTaskSubmittedNotification(taskDoc, staffUser, deviceDoc) {
+    try {
+        const title = "📋 Task Submitted for Review";
+        const deviceUid = deviceDoc ? deviceDoc.device_uid : "N/A";
+        const message = `Staff ${staffUser ? staffUser.name : 'Unknown'} has submitted the task for device ${deviceUid} (${deviceDoc?.location || ''}).`;
+
+        const recipients = [];
+        if (taskDoc.assignedBy) {
+            const admin = await User.findById(taskDoc.assignedBy);
+            if (admin) recipients.push(admin);
+        }
+        if (recipients.length === 0) {
+            const allAdmins = await User.find({ role: "admin" });
+            recipients.push(...allAdmins);
+        }
+
+        for (const adminUser of recipients) {
+            // Save DB Notification
+            const dbNotification = await Notification.create({
+                recipient: adminUser._id,
+                recipientRole: "admin",
+                device_uid: deviceUid,
+                device: deviceDoc ? deviceDoc._id : null,
+                title: title,
+                message: message,
+                type: "TASK_SUBMITTED"
+            });
+
+            // Send FCM Push
+            const userTokens = [];
+            if (adminUser.fcmToken) userTokens.push(adminUser.fcmToken);
+            if (Array.isArray(adminUser.fcmTokens)) userTokens.push(...adminUser.fcmTokens);
+
+            if (userTokens.length > 0) {
+                await sendPushNotification({
+                    tokens: userTokens,
+                    title: title,
+                    body: message,
+                    data: {
+                        taskId: taskDoc._id.toString(),
+                        device_uid: deviceUid
+                    }
+                });
+            }
+
+            // Socket emission
+            if (global.io) {
+                global.io.emit("new_notification", dbNotification);
+                global.io.to(`user_${adminUser._id}`).emit("user_notification", dbNotification);
+            }
+        }
+    } catch (error) {
+        console.log("❌ sendTaskSubmittedNotification Error:", error.message);
+    }
+}
+
+async function sendTaskVerifiedNotification(taskDoc, staffUser, adminUser, deviceDoc) {
+    try {
+        if (!staffUser) return;
+
+        const title = "✅ Task Verified Clean";
+        const deviceUid = deviceDoc ? deviceDoc.device_uid : "N/A";
+        const message = `Admin ${adminUser ? adminUser.name : 'Admin'} has verified your task for device ${deviceUid} (${deviceDoc?.location || ''}).`;
+
+        // Save DB Notification
+        const dbNotification = await Notification.create({
+            recipient: staffUser._id,
+            recipientRole: "staff",
+            device_uid: deviceUid,
+            device: deviceDoc ? deviceDoc._id : null,
+            title: title,
+            message: message,
+            type: "TASK_VERIFIED"
+        });
+
+        // Send FCM Push
+        const userTokens = [];
+        if (staffUser.fcmToken) userTokens.push(staffUser.fcmToken);
+        if (Array.isArray(staffUser.fcmTokens)) userTokens.push(...staffUser.fcmTokens);
+
+        if (userTokens.length > 0) {
+            await sendPushNotification({
+                tokens: userTokens,
+                title: title,
+                body: message,
+                data: {
+                    taskId: taskDoc._id.toString(),
+                    device_uid: deviceUid
+                }
+            });
+        }
+
+        // Socket emission
+        if (global.io) {
+            global.io.emit("new_notification", dbNotification);
+            global.io.to(`user_${staffUser._id}`).emit("user_notification", dbNotification);
+        }
+    } catch (error) {
+        console.log("❌ sendTaskVerifiedNotification Error:", error.message);
+    }
+}
+
 module.exports = {
     handleMqttAlertNotification,
-    sendTaskAssignedNotification
+    sendTaskAssignedNotification,
+    sendTaskSubmittedNotification,
+    sendTaskVerifiedNotification
 };

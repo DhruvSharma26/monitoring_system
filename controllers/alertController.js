@@ -39,14 +39,20 @@ const getAlerts = async (req, res) => {
             if (!seenDevices.has(alerts[i].device_uid)) {
                 seenDevices.add(alerts[i].device_uid);
                 
-                if (alerts[i].status === "ASSIGNED") {
-                    const task = await Task.findOne({ alert: alerts[i]._id }).populate("staff", "name");
-                    if (task && task.staff) {
+                const task = await Task.findOne({ alert: alerts[i]._id }).populate("staff", "name");
+                if (task) {
+                    alerts[i].taskId = task._id;
+                    alerts[i].taskStatus = task.status;
+                    alerts[i].taskProgressPercent = task.progressPercent || 0;
+                    alerts[i].taskCleaningPhotos = (task.cleaningPhotos || []).map(p => p.url);
+                    alerts[i].assignedAt = task.assignedAt;
+                    alerts[i].startedAt = task.startedAt;
+                    alerts[i].photosUploadedAt = task.photosUploadedAt;
+                    alerts[i].submittedAt = task.submittedAt;
+                    alerts[i].completedAt = task.completedAt;
+                    alerts[i].verifiedAt = task.verifiedAt;
+                    if (task.staff) {
                         alerts[i].assignedStaffName = task.staff.name;
-                        alerts[i].taskId = task._id;
-                        alerts[i].taskStatus = task.status;
-                        alerts[i].taskProgressPercent = task.progressPercent || 0;
-                        alerts[i].taskCleaningPhotos = (task.cleaningPhotos || []).map(p => p.url);
                     }
                 }
                 latestAlerts.push(alerts[i]);

@@ -227,6 +227,16 @@ const submitTask = async (req, res) => {
         await task.save();
         broadcastTaskUpdate(task);
 
+        // Trigger notification to admin
+        try {
+            const staff = await User.findById(task.staff);
+            const device = await Device.findById(task.device);
+            const notificationService = require("../services/notificationService");
+            notificationService.sendTaskSubmittedNotification(task, staff, device);
+        } catch (err) {
+            console.log("Error sending task submission notification:", err.message);
+        }
+
         console.log(`✅ Task ${task._id} SUBMITTED at ${now.toISOString()} (${Math.round(elapsedMins)} mins elapsed)`);
 
         res.status(200).json({
@@ -267,6 +277,17 @@ const verifyTask = async (req, res) => {
 
         await task.save();
         broadcastTaskUpdate(task);
+
+        // Trigger notification to staff
+        try {
+            const staff = await User.findById(task.staff);
+            const device = await Device.findById(task.device);
+            const admin = await User.findById(req.user.id);
+            const notificationService = require("../services/notificationService");
+            notificationService.sendTaskVerifiedNotification(task, staff, admin, device);
+        } catch (err) {
+            console.log("Error sending task verification notification:", err.message);
+        }
 
         res.status(200).json({
             success: true,
