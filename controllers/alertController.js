@@ -214,6 +214,51 @@ const assignAlert = async (req, res) => {
     }
 };
 
+const deleteAlert = async (req, res) => {
+    try {
+        if (req.user.role !== "admin") {
+            return res.status(403).json({
+                success: false,
+                message: "Access Denied: Only admins can delete alerts"
+            });
+        }
+
+        const alert = await Alert.findById(req.params.alertId);
+        if (!alert) {
+            return res.status(404).json({
+                success: false,
+                message: "Alert not found"
+            });
+        }
+
+        // Verify that the alert is for a device belonging to the admin
+        const device = await Device.findOne({ device_uid: alert.device_uid, adminId: req.user.id });
+        if (!device) {
+            return res.status(403).json({
+                success: false,
+                message: "Access Denied: You do not manage the device for this alert"
+            });
+        }
+
+        // Delete associated tasks if they exist
+        await Task.deleteMany({ alert: req.params.alertId });
+
+        // Delete the alert
+        await Alert.findByIdAndDelete(req.params.alertId);
+
+        res.status(200).json({
+            success: true,
+            message: "Alert deleted successfully"
+        });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json({
+            success: false,
+            message: "Server Error"
+        });
+    }
+};
+
 module.exports = {
 
     getAlerts,
@@ -222,6 +267,8 @@ module.exports = {
 
     resolveAlert,
     
-    assignAlert
+    assignAlert,
+
+    deleteAlert
 
 };

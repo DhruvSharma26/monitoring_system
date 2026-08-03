@@ -13,7 +13,9 @@ const {
 
     resolveAlert,
     
-    assignAlert
+    assignAlert,
+
+    deleteAlert
 
 } = require(
     "../controllers/alertController"
@@ -38,6 +40,11 @@ router.get(
     "/:alertId",
     authMiddleware,
     getAlertDetails
+);
+router.delete(
+    "/:alertId",
+    authMiddleware,
+    deleteAlert
 );
 
 module.exports = router;
