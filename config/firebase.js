@@ -107,7 +107,42 @@ async function sendPushNotification({ tokens, title, body, data = {} }) {
                 body: body
             },
             data: stringData,
-            tokens: tokenList
+            tokens: tokenList,
+
+            // ─── Android-specific configuration ────────────────────────────────────
+            // CRITICAL: channelId MUST match the channel created in Flutter
+            //   (sinexus_high_importance_channel) AND the AndroidManifest meta-data.
+            // Without this, FCM posts to a default/nonexistent channel and the
+            // notification is silently dropped on Android 8.0+ (API 26+).
+            android: {
+                priority: "high",               // Wake device even in Doze mode
+                notification: {
+                    channelId: "sinexus_high_importance_channel",  // ← Must match Flutter channel
+                    sound: "default",
+                    defaultVibrateTimings: true,
+                    notificationPriority: "PRIORITY_HIGH",
+                    visibility: "PUBLIC"        // Show on lock screen
+                },
+                // Delivery priority: HIGH ensures immediate delivery even in Doze
+                data: {
+                    ...stringData               // Data payload forwarded to background handler
+                }
+            },
+
+            // ─── Apple (iOS/iPadOS) configuration ──────────────────────────────────
+            apns: {
+                payload: {
+                    aps: {
+                        alert: { title: title, body: body },
+                        sound: "default",
+                        badge: 1,
+                        "content-available": 1   // Wake app in background (silent push)
+                    }
+                },
+                headers: {
+                    "apns-priority": "10"       // 10 = immediate; 5 = opportunistic
+                }
+            }
         };
 
         const response = await getMessaging().sendEachForMulticast(messagePayload);

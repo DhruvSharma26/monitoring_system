@@ -90,19 +90,10 @@ const getToiletDetails = async (req, res) => {
                 const sumRating = dayLogs.reduce((acc, l) => acc + feedbackToRating(l.feedback), 0);
                 dayRating = parseFloat((sumRating / dayLogs.length).toFixed(1));
             } else {
-                const baseCounter = 25 + ((hashUid + i * 7) % 35);
-                dayCounter = baseCounter;
-
-                let baseOdor = 20 + ((hashUid + i * 5) % 25);
-                if (latestStatus?.feedback === 3) baseOdor = 65 + (i * 2);
-                if (latestStatus?.feedback === 4) baseOdor = 85 + (i * 3);
-                dayOdor = Math.min(100, baseOdor);
-
-                let baseRating = 4.5;
-                if (latestStatus?.feedback === 3) baseRating = 3.2;
-                if (latestStatus?.feedback === 4) baseRating = 1.8;
-                const pseudoVariance = ((hashUid * 3 + i * 4) % 7 - 3) * 0.1;
-                dayRating = Math.min(5.0, Math.max(1.0, parseFloat((baseRating + pseudoVariance).toFixed(1))));
+                // REAL DYNAMIC DATA: No sensor logs for this day -> 0 (No fake static numbers)
+                dayCounter = 0;
+                dayOdor = 0;
+                dayRating = 0;
             }
 
             counterHistory.push({ day: dayLabel, date: dateStr, value: dayCounter });

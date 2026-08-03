@@ -68,7 +68,7 @@ const registerDevice = async (req, res) => {
 
 const getDevices = async (req, res) => {
     try {
-        const devices = await Device.find({ adminId: req.user.id });
+        const devices = await Device.find({ adminId: req.user.id }).sort({ createdAt: -1 });
         res.status(200).json({
             success: true,
             devices

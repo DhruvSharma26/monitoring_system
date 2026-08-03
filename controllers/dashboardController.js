@@ -14,7 +14,7 @@ const getDashboard = async (req, res) => {
         const [devices, statuses, liveAlerts] =
             await Promise.all([
 
-                Device.find({ adminId: req.user.id }).lean(),
+                Device.find({ adminId: req.user.id }).sort({ createdAt: -1 }).lean(),
 
                 LatestDeviceStatus.find().lean(),
 
@@ -145,7 +145,7 @@ const getMapData = async (req, res) => {
         const [devices, statuses] =
             await Promise.all([
 
-                Device.find({ adminId: req.user.id }).lean(),
+                Device.find({ adminId: req.user.id }).sort({ createdAt: -1 }).lean(),
 
                 LatestDeviceStatus
                     .find()
@@ -259,7 +259,7 @@ const getLiveAlerts = async (req, res) => {
         const [devices, statuses] =
             await Promise.all([
 
-                Device.find({ adminId: req.user.id }).lean(),
+                Device.find({ adminId: req.user.id }).sort({ createdAt: -1 }).lean(),
 
                 LatestDeviceStatus
                     .find()
@@ -498,7 +498,7 @@ const getAttentionCriticalToilets =
 
 const getToiletRatingComparison = async (req, res) => {
     try {
-        const devices = await Device.find({ adminId: req.user.id }).lean();
+        const devices = await Device.find({ adminId: req.user.id }).sort({ createdAt: -1 }).lean();
         const statuses = await LatestDeviceStatus.find().lean();
         const statusMap = {};
         statuses.forEach(item => {
@@ -546,12 +546,10 @@ const getToiletRatingComparison = async (req, res) => {
                 if (dayLogs.length > 0) {
                     const daySum = dayLogs.reduce((acc, log) => acc + feedbackToRating(log.feedback), 0);
                     dayRating = parseFloat((daySum / dayLogs.length).toFixed(1));
+                    sumRating += dayRating;
+                    ratingCount++;
                 } else {
-                    let base = 4.5;
-                    if (statusObj?.feedback === 3) base = 3.2;
-                    if (statusObj?.feedback === 4) base = 1.8;
-                    const pseudoVariance = ((index * 7 + i * 3) % 9 - 4) * 0.1;
-                    dayRating = Math.min(5.0, Math.max(1.0, parseFloat((base + pseudoVariance).toFixed(1))));
+                    dayRating = 0.0;
                 }
 
                 dailyRatings.push({
@@ -559,12 +557,9 @@ const getToiletRatingComparison = async (req, res) => {
                     date: dateStr,
                     rating: dayRating
                 });
-
-                sumRating += dayRating;
-                ratingCount++;
             }
 
-            const avgRating = parseFloat((sumRating / ratingCount).toFixed(1));
+            const avgRating = ratingCount > 0 ? parseFloat((sumRating / ratingCount).toFixed(1)) : 0.0;
 
             let status = "clean";
             if (statusObj) {

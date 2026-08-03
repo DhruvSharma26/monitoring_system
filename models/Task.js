@@ -37,7 +37,7 @@ const taskSchema = new mongoose.Schema(
     },
 
     priority: { type: String, default: "high" },
-    est_time: { type: String, default: "15 mins" },
+    est_time: { type: String, default: "" },
     distance: { type: String, default: "50m" },
     due_time: { type: String, default: "ASAP" },
     assignedAt: { type: Date, default: Date.now },

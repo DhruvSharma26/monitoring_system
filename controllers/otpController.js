@@ -29,23 +29,40 @@ const sendOtp = async (req, res, next) => {
         });
 
         const transporter = nodemailer.createTransport({
-            service: "gmail",
+            host: "smtp.gmail.com",
+            port: 465,
+            secure: true,
             auth: {
                 user: process.env.EMAIL_USER,
                 pass: process.env.EMAIL_PASS
+            },
+            tls: {
+                rejectUnauthorized: false
             }
         });
 
+        console.log(`📧 [OTP SENT] Sending OTP ${otp} to ${email}`);
+
         await transporter.sendMail({
-            from: process.env.EMAIL_USER,
+            from: `"Sinexus Monitoring" <${process.env.EMAIL_USER}>`,
             to: email,
-            subject: "OTP Verification",
-            text: `Your OTP is ${otp}`
+            subject: "Sinexus - Email Verification OTP",
+            text: `Your OTP for Sinexus email verification is: ${otp}. This OTP is valid for 5 minutes.`,
+            html: `
+                <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+                    <h2 style="color: #1565C0;">Sinexus Email Verification</h2>
+                    <p>Use the following OTP to verify your email address during staff registration:</p>
+                    <div style="font-size: 24px; font-weight: bold; letter-spacing: 4px; color: #1565C0; background: #f0f4f8; padding: 12px 20px; display: inline-block; border-radius: 8px;">
+                        ${otp}
+                    </div>
+                    <p style="margin-top: 20px; font-size: 12px; color: #777;">This OTP will expire in 5 minutes.</p>
+                </div>
+            `
         });
 
         res.status(200).json({
             success: true,
-            message: "OTP sent successfully"
+            message: `OTP sent successfully to ${email}`
         });
 
     } catch (error) {
