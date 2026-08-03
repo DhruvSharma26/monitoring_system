@@ -39,7 +39,7 @@ const getAlerts = async (req, res) => {
             if (!seenDevices.has(alerts[i].device_uid)) {
                 seenDevices.add(alerts[i].device_uid);
                 
-                const task = await Task.findOne({ alert: alerts[i]._id }).populate("staff", "name");
+                const task = await Task.findOne({ alert: alerts[i]._id }).populate("staff", "name empId userId");
                 if (task) {
                     alerts[i].taskId = task._id;
                     alerts[i].taskStatus = task.status;
@@ -53,6 +53,7 @@ const getAlerts = async (req, res) => {
                     alerts[i].verifiedAt = task.verifiedAt;
                     if (task.staff) {
                         alerts[i].assignedStaffName = task.staff.name;
+                        alerts[i].assignedStaffEmpId = task.staff.empId || task.staff.userId || "";
                     }
                 }
                 latestAlerts.push(alerts[i]);
