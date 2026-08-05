@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const User = require("../models/User");
 const Device = require("../models/Device");
 const Otp = require("../models/Otp");
@@ -68,7 +69,13 @@ const registerStaff = async (req, res) => {
 
         const staffId = "STF" + String(staffCount + 1).padStart(3, "0");
 
-        const device = await Device.findOne({ _id: deviceId, adminId: req.user.id });
+        const isObjectId = mongoose.Types.ObjectId.isValid(deviceId);
+        const device = await Device.findOne({
+            $or: isObjectId
+                ? [{ _id: deviceId }, { device_uid: deviceId }, { deviceId: deviceId }]
+                : [{ device_uid: deviceId }, { deviceId: deviceId }],
+            adminId: req.user.id
+        });
 
         if (!device) {
             return res.status(404).json({

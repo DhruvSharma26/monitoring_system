@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Device = require("../models/Device");
 const User = require("../models/User");
 const LatestDeviceStatus = require("../models/LatestDeviceStatus");
@@ -150,8 +151,11 @@ const geocodeLocation = async (req, res) => {
 const deleteDevice = async (req, res) => {
     try {
         const { id } = req.params;
+        const isObjectId = mongoose.Types.ObjectId.isValid(id);
         const device = await Device.findOne({
-            $or: [{ _id: id }, { deviceId: id }],
+            $or: isObjectId
+                ? [{ _id: id }, { deviceId: id }, { device_uid: id }]
+                : [{ deviceId: id }, { device_uid: id }],
             adminId: req.user.id
         });
 

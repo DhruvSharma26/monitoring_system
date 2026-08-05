@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Device = require("../models/Device");
 const SensorData = require("../models/SensorData");
 const LatestDeviceStatus = require("../models/LatestDeviceStatus");
@@ -287,7 +288,10 @@ const getDeviceReports = async (req, res) => {
 
         let query = { adminId: req.user.id };
         if (deviceId && deviceId !== "All") {
-            query.$or = [{ deviceId }, { device_uid: deviceId }, { _id: deviceId }];
+            const isObjectId = mongoose.Types.ObjectId.isValid(deviceId);
+            query.$or = isObjectId
+                ? [{ deviceId }, { device_uid: deviceId }, { _id: deviceId }]
+                : [{ deviceId }, { device_uid: deviceId }];
         }
 
         const devices = await Device.find(query).lean();
@@ -460,7 +464,10 @@ const downloadReportPdf = async (req, res) => {
 
         let query = { adminId: req.user.id };
         if (deviceId && deviceId !== "All") {
-            query.$or = [{ deviceId }, { device_uid: deviceId }, { _id: deviceId }];
+            const isObjectId = mongoose.Types.ObjectId.isValid(deviceId);
+            query.$or = isObjectId
+                ? [{ deviceId }, { device_uid: deviceId }, { _id: deviceId }]
+                : [{ deviceId }, { device_uid: deviceId }];
         }
 
         let device = await Device.findOne(query).lean();
@@ -595,7 +602,10 @@ const downloadReportCsv = async (req, res) => {
 
         let query = { adminId: req.user.id };
         if (deviceId && deviceId !== "All") {
-            query.$or = [{ deviceId }, { device_uid: deviceId }, { _id: deviceId }];
+            const isObjectId = mongoose.Types.ObjectId.isValid(deviceId);
+            query.$or = isObjectId
+                ? [{ deviceId }, { device_uid: deviceId }, { _id: deviceId }]
+                : [{ deviceId }, { device_uid: deviceId }];
         }
 
         let device = await Device.findOne(query).lean();
