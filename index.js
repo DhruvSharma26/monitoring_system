@@ -26,6 +26,7 @@ const SensorData = require("./models/SensorData");
 const LatestDeviceStatus = require("./models/LatestDeviceStatus");
 const Alert = require("./models/Alert");
 const Settings = require("./models/Settings");
+const Device = require("./models/Device");
 const dashboardRoutes =
 require("./routes/dashboardRoutes");
 const taskRoutes =

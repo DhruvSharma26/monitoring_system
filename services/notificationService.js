@@ -1,7 +1,6 @@
 const Notification = require("../models/Notification");
 const User = require("../models/User");
 const Device = require("../models/Device");
-const { sendEmail } = require("./emailService");
 const { sendPushNotification } = require("../config/firebase");
 
 /**
@@ -121,17 +120,6 @@ async function handleMqttAlertNotification(sensorPayload, alertType, alertDoc) {
 
                 global.io.to(`user_${user._id}`).emit("new_notification", socketPayload);
                 global.io.to(`user_${user._id}`).emit("user_notification", socketPayload);
-            }
-
-            // D. Email Notification
-            if (user.email) {
-                sendEmail({
-                    to: user.email,
-                    subject: `${title} (${deviceUid})`,
-                    text: `${message}\n\nPlease check your app for full details.`
-                }).catch(err => {
-                    console.log(`⚠️ Email dispatch error to ${user.email}: ${err.message}`);
-                });
             }
         }
     } catch (error) {
