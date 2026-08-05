@@ -1,22 +1,8 @@
 const Notification = require("../models/Notification");
 const User = require("../models/User");
 const Device = require("../models/Device");
-const nodemailer = require("nodemailer");
+const { sendEmail } = require("./emailService");
 const { sendPushNotification } = require("../config/firebase");
-
-// Create reusable nodemailer transporter
-function getMailTransporter() {
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-        return null;
-    }
-    return nodemailer.createTransport({
-        service: "gmail",
-        auth: {
-            user: process.env.EMAIL_USER,
-            pass: process.env.EMAIL_PASS
-        }
-    });
-}
 
 /**
  * Handle notification dispatch when an alert is created from MQTT feedback/sensor data.
@@ -80,8 +66,6 @@ async function handleMqttAlertNotification(sensorPayload, alertType, alertDoc) {
         const details = [locationText, feedbackText, odorText, counterText].filter(Boolean).join(" | ");
         const message = `Alert [${humanAlertType}] created for device ${deviceUid}. (${details})`;
 
-        const transporter = getMailTransporter();
-
         // 4. Dispatch Notifications to each Recipient (Admin & Staff)
         for (const user of recipients) {
             // A. Save Notification to Database
@@ -141,14 +125,13 @@ async function handleMqttAlertNotification(sensorPayload, alertType, alertDoc) {
             }
 
             // D. Email Notification
-            if (transporter && user.email) {
-                transporter.sendMail({
-                    from: process.env.EMAIL_USER,
+            if (user.email) {
+                sendEmail({
                     to: user.email,
                     subject: `${title} (${deviceUid})`,
                     text: `${message}\n\nPlease check your app for full details.`
                 }).catch(err => {
-                    console.log(`⚠️ Email dispatch error to ${user.email}:`, err.message);
+                    console.log(`⚠️ Email dispatch error to ${user.email}: ${err.message}`);
                 });
             }
         }

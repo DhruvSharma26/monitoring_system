@@ -6,6 +6,10 @@ const path = require("path");
 
 let isInitialized = false;
 
+/**
+ * Initialize Firebase Admin SDK using environment variables or local service account file.
+ * Handles both JSON string formats and escaped newline characters in private keys.
+ */
 function initFirebase() {
     try {
         if (getApps().length > 0) {
@@ -14,25 +18,42 @@ function initFirebase() {
         }
 
         let credential = null;
+        let projectId = null;
 
-        // 1. Check for JSON string in environment variable
-        if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+        // 1. Check for JSON string in environment variable (FIREBASE_SERVICE_ACCOUNT or FIREBASE_SERVICE_ACCOUNT_JSON)
+        const rawJsonEnv = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+        if (rawJsonEnv) {
             try {
-                const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+                const serviceAccount = typeof rawJsonEnv === "object" 
+                    ? rawJsonEnv 
+                    : JSON.parse(rawJsonEnv);
+
+                if (serviceAccount.private_key) {
+                    serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
+                }
+
                 credential = cert(serviceAccount);
-            } catch (e) {
-                console.log("⚠️ Could not parse FIREBASE_SERVICE_ACCOUNT_JSON:", e.message);
+                projectId = serviceAccount.project_id;
+                console.log(`🔥 [FIREBASE] Parsed service account JSON successfully (Project ID: ${projectId || 'N/A'}).`);
+            } catch (jsonErr) {
+                console.error("❌ [FIREBASE ERROR] Could not parse FIREBASE_SERVICE_ACCOUNT JSON string:", jsonErr.message);
             }
         }
 
         // 2. Check for individual environment variables
         if (!credential && process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
-            const privateKey = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n");
-            credential = cert({
-                projectId: process.env.FIREBASE_PROJECT_ID,
-                clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-                privateKey: privateKey
-            });
+            try {
+                const privateKey = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n");
+                projectId = process.env.FIREBASE_PROJECT_ID;
+                credential = cert({
+                    projectId: projectId,
+                    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+                    privateKey: privateKey
+                });
+                console.log(`🔥 [FIREBASE] Loaded credentials from individual environment variables (Project ID: ${projectId}).`);
+            } catch (envErr) {
+                console.error("❌ [FIREBASE ERROR] Failed to load credentials from individual env vars:", envErr.message);
+            }
         }
 
         // 3. Check for local firebase-service-account.json file
@@ -40,12 +61,25 @@ function initFirebase() {
             const localPath = path.join(__dirname, "firebase-service-account.json");
             const rootPath = path.join(__dirname, "..", "firebase-service-account.json");
             
+            let filePath = null;
             if (fs.existsSync(localPath)) {
-                const serviceAccount = require(localPath);
-                credential = cert(serviceAccount);
+                filePath = localPath;
             } else if (fs.existsSync(rootPath)) {
-                const serviceAccount = require(rootPath);
-                credential = cert(serviceAccount);
+                filePath = rootPath;
+            }
+
+            if (filePath) {
+                try {
+                    const serviceAccount = require(filePath);
+                    if (serviceAccount.private_key) {
+                        serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
+                    }
+                    credential = cert(serviceAccount);
+                    projectId = serviceAccount.project_id;
+                    console.log(`🔥 [FIREBASE] Loaded service account from file: ${filePath}`);
+                } catch (fileErr) {
+                    console.error(`❌ [FIREBASE ERROR] Failed to load service account file (${filePath}):`, fileErr.message);
+                }
             }
         }
 
@@ -54,21 +88,23 @@ function initFirebase() {
                 credential: credential
             });
             isInitialized = true;
-            console.log("🔥 Firebase Admin SDK initialized successfully.");
+            console.log(`🔥 Firebase Admin SDK initialized successfully (Project: ${projectId || 'Active'}).`);
         } else {
-            console.log("ℹ️ Firebase Admin SDK is pending configuration (Awaiting environment variables or firebase-service-account.json).");
+            console.warn("⚠️ Firebase Admin SDK: Missing FIREBASE_SERVICE_ACCOUNT environment variable or service account file. Mobile push notifications will be disabled.");
         }
     } catch (error) {
-        console.log("⚠️ Firebase Initialization Warning:", error.message);
+        console.error("❌ Firebase Initialization Error:", error.message);
         isInitialized = false;
     }
 }
 
-// Call init on module load
+// Initialize on module load
 initFirebase();
 
 /**
- * Send FCM push notification to a single token or list of tokens.
+ * Send FCM push notification to single or multiple device tokens.
+ * Automatically cleans up invalid/expired tokens from MongoDB.
+ * 
  * @param {Object} params
  * @param {String|Array<String>} params.tokens - FCM Device token(s)
  * @param {String} params.title - Notification title
@@ -77,22 +113,23 @@ initFirebase();
  */
 async function sendPushNotification({ tokens, title, body, data = {} }) {
     if (!isInitialized || getApps().length === 0) {
-        // Try initializing once more in case env vars were set at runtime
         initFirebase();
     }
 
     if (!isInitialized || getApps().length === 0) {
-        console.log(`[FCM Pending] Push notification skipped for "${title}" - Firebase credentials not provided yet.`);
+        console.log(`[FCM Skipped] Push notification skipped for "${title}" - Firebase credentials not provided.`);
         return { success: false, message: "Firebase credentials not provided" };
     }
 
-    const tokenList = Array.isArray(tokens) ? tokens.filter(Boolean) : (tokens ? [tokens] : []);
+    const tokenList = Array.isArray(tokens) 
+        ? tokens.filter(t => typeof t === 'string' && t.trim().length > 0) 
+        : (tokens && typeof tokens === 'string' && tokens.trim().length > 0 ? [tokens.trim()] : []);
 
     if (tokenList.length === 0) {
         return { success: false, message: "No valid FCM tokens provided" };
     }
 
-    // Convert all data object values to string (FCM requirement for data payload)
+    // Convert all payload values to string (required by FCM data payload)
     const stringData = {};
     for (const key in data) {
         if (data[key] !== undefined && data[key] !== null) {
@@ -109,47 +146,80 @@ async function sendPushNotification({ tokens, title, body, data = {} }) {
             data: stringData,
             tokens: tokenList,
 
-            // ─── Android-specific configuration ────────────────────────────────────
-            // CRITICAL: channelId MUST match the channel created in Flutter
-            //   (sinexus_high_importance_channel) AND the AndroidManifest meta-data.
-            // Without this, FCM posts to a default/nonexistent channel and the
-            // notification is silently dropped on Android 8.0+ (API 26+).
+            // ─── Android High Priority Configuration ──────────────────────────────
             android: {
-                priority: "high",               // Wake device even in Doze mode
+                priority: "high",
                 notification: {
-                    channelId: "sinexus_high_importance_channel",  // ← Must match Flutter channel
+                    channelId: "sinexus_high_importance_channel",
                     sound: "default",
                     defaultVibrateTimings: true,
                     notificationPriority: "PRIORITY_HIGH",
-                    visibility: "PUBLIC"        // Show on lock screen
+                    visibility: "PUBLIC"
                 },
-                // Delivery priority: HIGH ensures immediate delivery even in Doze
                 data: {
-                    ...stringData               // Data payload forwarded to background handler
+                    ...stringData
                 }
             },
 
-            // ─── Apple (iOS/iPadOS) configuration ──────────────────────────────────
+            // ─── Apple iOS APNs Configuration ─────────────────────────────────────
             apns: {
                 payload: {
                     aps: {
                         alert: { title: title, body: body },
                         sound: "default",
                         badge: 1,
-                        "content-available": 1   // Wake app in background (silent push)
+                        "content-available": 1
                     }
                 },
                 headers: {
-                    "apns-priority": "10"       // 10 = immediate; 5 = opportunistic
+                    "apns-priority": "10"
                 }
             }
         };
 
         const response = await getMessaging().sendEachForMulticast(messagePayload);
-        console.log(`🚀 FCM Push sent! Success: ${response.successCount}, Failures: ${response.failureCount}`);
+        console.log(`🚀 [FCM PUSH] Delivered push for "${title}" | Success: ${response.successCount}, Failure: ${response.failureCount}`);
+
+        // Handle invalid/expired tokens cleanup
+        if (response.failureCount > 0) {
+            const invalidTokens = [];
+            response.responses.forEach((resp, idx) => {
+                if (!resp.success) {
+                    const errCode = resp.error?.code || "";
+                    const errMsg = resp.error?.message || "";
+                    console.warn(`⚠️ [FCM TOKEN ERROR] Token [${tokenList[idx].substring(0, 10)}...]: Code: ${errCode} | Error: ${errMsg}`);
+                    if (
+                        errCode === "messaging/registration-token-not-registered" || 
+                        errCode === "messaging/invalid-registration-token" ||
+                        errMsg.includes("NotRegistered") ||
+                        errMsg.includes("InvalidRegistration")
+                    ) {
+                        invalidTokens.push(tokenList[idx]);
+                    }
+                }
+            });
+
+            if (invalidTokens.length > 0) {
+                try {
+                    const User = require("../models/User");
+                    await User.updateMany(
+                        { fcmTokens: { $in: invalidTokens } },
+                        { $pullAll: { fcmTokens: invalidTokens } }
+                    );
+                    await User.updateMany(
+                        { fcmToken: { $in: invalidTokens } },
+                        { $unset: { fcmToken: "" } }
+                    );
+                    console.log(`🧹 [FCM CLEANUP] Purged ${invalidTokens.length} expired/invalid FCM token(s) from MongoDB.`);
+                } catch (dbErr) {
+                    console.error("❌ [FCM CLEANUP ERROR] Failed to purge invalid tokens from database:", dbErr.message);
+                }
+            }
+        }
+
         return { success: true, response };
     } catch (error) {
-        console.log("❌ FCM Send Error:", error.message);
+        console.error("❌ [FCM SEND EXCEPTION] Failed to send push notification:", error.message);
         return { success: false, error: error.message };
     }
 }
