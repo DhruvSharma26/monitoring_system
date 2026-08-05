@@ -31,33 +31,40 @@ const getAlerts = async (req, res) => {
 
         const alerts = await Alert.find(query).sort({ createdAt: -1 }).lean();
 
-        const seenDevices = new Set();
+        const seenActiveDevices = new Set();
         const latestAlerts = [];
 
         for (let i = 0; i < alerts.length; i++) {
-            // Only keep the most recent alert per device
-            if (!seenDevices.has(alerts[i].device_uid)) {
-                seenDevices.add(alerts[i].device_uid);
-                
-                const task = await Task.findOne({ alert: alerts[i]._id }).populate("staff", "name empId userId");
-                if (task) {
-                    alerts[i].taskId = task._id;
-                    alerts[i].taskStatus = task.status;
-                    alerts[i].taskProgressPercent = task.progressPercent || 0;
-                    alerts[i].taskCleaningPhotos = (task.cleaningPhotos || []).map(p => p.url);
-                    alerts[i].assignedAt = task.assignedAt;
-                    alerts[i].startedAt = task.startedAt;
-                    alerts[i].photosUploadedAt = task.photosUploadedAt;
-                    alerts[i].submittedAt = task.submittedAt;
-                    alerts[i].completedAt = task.completedAt;
-                    alerts[i].verifiedAt = task.verifiedAt;
-                    if (task.staff) {
-                        alerts[i].assignedStaffName = task.staff.name;
-                        alerts[i].assignedStaffEmpId = task.staff.empId || task.staff.userId || "";
-                    }
+            const alertItem = alerts[i];
+            
+            // Deduplicate active/open alerts per device, but keep ALL resolved alerts so they populate the Resolved tab!
+            if (alertItem.status !== "RESOLVED") {
+                if (seenActiveDevices.has(alertItem.device_uid)) {
+                    continue;
                 }
-                latestAlerts.push(alerts[i]);
+                seenActiveDevices.add(alertItem.device_uid);
             }
+
+            const task = await Task.findOne({ alert: alertItem._id }).populate("staff", "name empId userId");
+            if (task) {
+                alertItem.taskId = task._id;
+                alertItem.taskStatus = task.status;
+                alertItem.taskProgressPercent = (task.status === "VERIFIED" || task.status === "COMPLETED" || task.status === "RESOLVED") 
+                    ? 100 
+                    : (task.progressPercent || 0);
+                alertItem.taskCleaningPhotos = (task.cleaningPhotos || []).map(p => p.url);
+                alertItem.assignedAt = task.assignedAt;
+                alertItem.startedAt = task.startedAt;
+                alertItem.photosUploadedAt = task.photosUploadedAt;
+                alertItem.submittedAt = task.submittedAt;
+                alertItem.completedAt = task.completedAt;
+                alertItem.verifiedAt = task.verifiedAt;
+                if (task.staff) {
+                    alertItem.assignedStaffName = task.staff.name;
+                    alertItem.assignedStaffEmpId = task.staff.empId || task.staff.userId || "";
+                }
+            }
+            latestAlerts.push(alertItem);
         }
 
         res.status(200).json({
@@ -156,8 +163,24 @@ const resolveAlert = async (req, res) => {
         }
 
         alert.status = "RESOLVED";
-
         await alert.save();
+
+        // Also update associated task if it exists
+        const task = await Task.findOne({ alert: alert._id });
+        if (task) {
+            task.status = "VERIFIED";
+            task.progressPercent = 100;
+            task.verifiedAt = task.verifiedAt || new Date();
+            task.completedAt = task.completedAt || new Date();
+            await task.save();
+            if (global.io) {
+                global.io.emit("task_status_updated", { taskId: task._id, status: "VERIFIED", progressPercent: 100 });
+            }
+        }
+
+        if (global.io) {
+            global.io.emit("new_alert", { alertId: alert._id, status: "RESOLVED" });
+        }
 
         res.status(200).json({
             success: true,

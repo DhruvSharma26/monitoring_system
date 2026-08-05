@@ -267,6 +267,8 @@ const verifyTask = async (req, res) => {
         task.status = "VERIFIED";
         task.adminRemarks = remarks;
         task.verifiedAt = now;
+        task.completedAt = task.completedAt || now;
+        task.progressPercent = 100;
 
         task.timeline.push({
             status: "VERIFIED",
@@ -276,7 +278,17 @@ const verifyTask = async (req, res) => {
         });
 
         await task.save();
+
+        // Mark associated Alert as RESOLVED in DB
+        if (task.alert) {
+            const Alert = require("../models/Alert");
+            await Alert.findByIdAndUpdate(task.alert, { status: "RESOLVED" });
+        }
+
         broadcastTaskUpdate(task);
+        if (global.io) {
+            global.io.emit("new_alert", { alertId: task.alert, status: "RESOLVED", taskId: task._id });
+        }
 
         // Trigger notification to staff
         try {
