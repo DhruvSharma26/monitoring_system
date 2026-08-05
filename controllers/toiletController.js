@@ -29,7 +29,7 @@ const getToiletDetails = async (req, res) => {
                 device_uid: device.device_uid,
                 timestamp: { $gte: sevenDaysAgo }
             }).sort({ timestamp: 1 }).lean(),
-            Task.findOne({ device: device._id, status: "COMPLETED" }).sort({ updatedAt: -1 }).lean()
+            Task.findOne({ device: device._id, status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] } }).populate("staff", "name empId userId").sort({ updatedAt: -1 }).lean()
         ]);
 
         let status = "clean";
@@ -39,14 +39,24 @@ const getToiletDetails = async (req, res) => {
         }
 
         let lastCleanedByStaff = "Not yet cleaned today";
-        if (lastCompletedTask && lastCompletedTask.updatedAt) {
-            lastCleanedByStaff = new Date(lastCompletedTask.updatedAt).toLocaleString("en-US", {
-                day: "2-digit",
-                month: "short",
-                year: "numeric",
-                hour: "2-digit",
-                minute: "2-digit"
-            });
+        let lastCleanedByStaffName = "";
+        let lastCleanedByStaffEmpId = "";
+
+        if (lastCompletedTask) {
+            const cleanedDate = lastCompletedTask.verifiedAt || lastCompletedTask.completedAt || lastCompletedTask.submittedAt || lastCompletedTask.updatedAt;
+            if (cleanedDate) {
+                lastCleanedByStaff = new Date(cleanedDate).toLocaleString("en-US", {
+                    day: "2-digit",
+                    month: "short",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit"
+                });
+            }
+            if (lastCompletedTask.staff) {
+                lastCleanedByStaffName = lastCompletedTask.staff.name || "";
+                lastCleanedByStaffEmpId = lastCompletedTask.staff.empId || lastCompletedTask.staff.userId || "";
+            }
         } else if (latestStatus && latestStatus.timestamp) {
             lastCleanedByStaff = new Date(latestStatus.timestamp).toLocaleString("en-US", {
                 day: "2-digit",
@@ -134,6 +144,8 @@ const getToiletDetails = async (req, res) => {
             currentCounter: latestStatus?.Counter || 0,
             currentOdor: latestStatus?.OdorSensVal || 0,
             lastCleanedByStaff,
+            lastCleanedByStaffName,
+            lastCleanedByStaffEmpId,
             weeklyAnalysis: {
                 counterHistory,
                 odorHistory,

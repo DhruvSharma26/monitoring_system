@@ -18,7 +18,10 @@ const getToilets = async (req, res) => {
             Device.find({ adminId: req.user.id }).sort({ createdAt: -1 }).lean(),
             LatestDeviceStatus.find().lean(),
             SensorData.find().sort({ timestamp: 1 }).lean(),
-            Task.find({ status: "COMPLETED" }).sort({ updatedAt: -1 }).lean()
+            Task.find({ status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] } })
+                .populate("staff", "name empId userId")
+                .sort({ updatedAt: -1 })
+                .lean()
         ]);
 
         const statusMap = {};
@@ -69,14 +72,24 @@ const getToilets = async (req, res) => {
 
             const deviceTask = completedTasks.find(t => String(t.device) === String(device._id));
             let lastCleanedAt = "";
-            if (deviceTask && deviceTask.updatedAt) {
-                lastCleanedAt = new Date(deviceTask.updatedAt).toLocaleString("en-US", {
-                    day: "2-digit",
-                    month: "short",
-                    year: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit"
-                });
+            let lastCleanedByStaffName = "";
+            let lastCleanedByStaffEmpId = "";
+
+            if (deviceTask) {
+                const cleanedDate = deviceTask.verifiedAt || deviceTask.completedAt || deviceTask.submittedAt || deviceTask.updatedAt;
+                if (cleanedDate) {
+                    lastCleanedAt = new Date(cleanedDate).toLocaleString("en-US", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit"
+                    });
+                }
+                if (deviceTask.staff) {
+                    lastCleanedByStaffName = deviceTask.staff.name || "";
+                    lastCleanedByStaffEmpId = deviceTask.staff.empId || deviceTask.staff.userId || "";
+                }
             } else if (latestStatus && latestStatus.timestamp) {
                 lastCleanedAt = new Date(latestStatus.timestamp).toLocaleString("en-US", {
                     day: "2-digit",
@@ -88,7 +101,7 @@ const getToilets = async (req, res) => {
             }
 
             toilets.push({
-                deviceId: device.deviceId,
+                deviceId: device.deviceId || device.device_uid,
                 device_uid: device.device_uid,
                 location: device.location,
                 floor: device.floor,
@@ -103,7 +116,9 @@ const getToilets = async (req, res) => {
                 latitude: device.latitude,
                 longitude: device.longitude,
                 timestamp: latestStatus.timestamp || device.createdAt,
-                lastCleanedAt: lastCleanedAt
+                lastCleanedAt: lastCleanedAt,
+                lastCleanedByStaffName: lastCleanedByStaffName,
+                lastCleanedByStaffEmpId: lastCleanedByStaffEmpId
             });
         }
 
