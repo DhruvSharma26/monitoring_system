@@ -1,56 +1,97 @@
-const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+const getApiKey = () => process.env.GOOGLE_MAPS_API_KEY;
 
 /**
  * Geocodes an address string to latitude and longitude coordinates.
+ * Supports Google Maps API with automatic fallback to OpenStreetMap Nominatim.
  * @param {string} address
  * @returns {Promise<{lat: number, lng: number, formattedAddress: string}|null>}
  */
 const geocodeAddress = async (address) => {
-    if (!address || !apiKey) return null;
+    if (!address || !address.trim()) return null;
+    const apiKey = getApiKey();
 
+    if (apiKey) {
+        try {
+            const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`;
+            const response = await fetch(url);
+            const data = await response.json();
+
+            if (data.status === "OK" && data.results && data.results.length > 0) {
+                const location = data.results[0].geometry.location;
+                return {
+                    lat: location.lat,
+                    lng: location.lng,
+                    formattedAddress: data.results[0].formatted_address
+                };
+            }
+            console.warn("Google Maps Geocoding status:", data.status);
+        } catch (error) {
+            console.error("Error in Google Maps geocodeAddress:", error);
+        }
+    }
+
+    // Fallback: OpenStreetMap Nominatim API
     try {
-        const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`;
-        const response = await fetch(url);
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`;
+        const response = await fetch(url, {
+            headers: { 'User-Agent': 'SinexusMonitoringApp/1.0' }
+        });
         const data = await response.json();
-
-        if (data.status === "OK" && data.results && data.results.length > 0) {
-            const location = data.results[0].geometry.location;
+        if (Array.isArray(data) && data.length > 0) {
             return {
-                lat: location.lat,
-                lng: location.lng,
-                formattedAddress: data.results[0].formatted_address
+                lat: parseFloat(data[0].lat),
+                lng: parseFloat(data[0].lon),
+                formattedAddress: data[0].display_name
             };
         }
-        console.warn("Geocoding failed with status:", data.status);
-        return null;
     } catch (error) {
-        console.error("Error in geocodeAddress:", error);
-        return null;
+        console.error("Error in Nominatim fallback geocodeAddress:", error);
     }
+
+    return null;
 };
 
 /**
  * Reverse geocodes coordinates to a human-readable address string.
+ * Supports Google Maps API with automatic fallback to OpenStreetMap Nominatim.
  * @param {number} lat
  * @param {number} lng
  * @returns {Promise<string|null>}
  */
 const reverseGeocode = async (lat, lng) => {
-    if (lat == null || lng == null || !apiKey) return null;
+    if (lat == null || lng == null) return null;
+    const apiKey = getApiKey();
 
-    try {
-        const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}`;
-        const response = await fetch(url);
-        const data = await response.json();
+    if (apiKey) {
+        try {
+            const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}`;
+            const response = await fetch(url);
+            const data = await response.json();
 
-        if (data.status === "OK" && data.results && data.results.length > 0) {
-            return data.results[0].formatted_address;
+            if (data.status === "OK" && data.results && data.results.length > 0) {
+                return data.results[0].formatted_address;
+            }
+            console.warn("Google Maps Reverse Geocoding status:", data.status);
+        } catch (error) {
+            console.error("Error in Google Maps reverseGeocode:", error);
         }
-        return null;
-    } catch (error) {
-        console.error("Error in reverseGeocode:", error);
-        return null;
     }
+
+    // Fallback: OpenStreetMap Nominatim API
+    try {
+        const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`;
+        const response = await fetch(url, {
+            headers: { 'User-Agent': 'SinexusMonitoringApp/1.0' }
+        });
+        const data = await response.json();
+        if (data && data.display_name) {
+            return data.display_name;
+        }
+    } catch (error) {
+        console.error("Error in Nominatim fallback reverseGeocode:", error);
+    }
+
+    return null;
 };
 
 /**
@@ -60,6 +101,7 @@ const reverseGeocode = async (lat, lng) => {
  * @returns {Promise<{distance: string, duration: string}|null>}
  */
 const getDistanceMatrix = async (origin, destination) => {
+    const apiKey = getApiKey();
     if (!origin || !destination || !apiKey) return null;
 
     try {

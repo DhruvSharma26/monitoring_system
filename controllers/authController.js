@@ -214,7 +214,20 @@ const refresh = async (req, res, next) => {
             { expiresIn: "15m" }
         );
 
-        res.status(200).json({ success: true, token });
+        const newRefreshToken = jwt.sign(
+            { id: user._id },
+            process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
+            { expiresIn: "7d" }
+        );
+
+        user.refreshToken = newRefreshToken;
+        await user.save();
+
+        res.status(200).json({
+            success: true,
+            token,
+            refreshToken: newRefreshToken
+        });
     } catch (error) {
         if (error.name === "TokenExpiredError" || error.name === "JsonWebTokenError") {
             return res.status(401).json({ success: false, message: "Invalid or expired refresh token" });
