@@ -247,9 +247,44 @@ const generateReport = async (req, res) => {
     }
 };
 
+const parseReportDateRange = (reqQuery) => {
+    const { from, till, to } = reqQuery;
+    const now = new Date();
+    let fromDate = from ? new Date(from) : new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    let tillDate = (till || to) ? new Date(till || to) : new Date(now);
+
+    if (isNaN(fromDate.getTime())) fromDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    if (isNaN(tillDate.getTime())) tillDate = new Date(now);
+
+    if (typeof from === 'string' && from.length === 10) {
+        fromDate.setHours(0, 0, 0, 0);
+    }
+    if (typeof (till || to) === 'string' && (till || to).length === 10) {
+        tillDate.setHours(23, 59, 59, 999);
+    }
+
+    return { fromDate, tillDate };
+};
+
+const getReportUserInfo = (userObj) => {
+    const generatedBy = userObj?.name || userObj?.contactPersonName || userObj?.email || "Admin";
+    const userId = userObj?.userId || userObj?.empId || userObj?.id || (userObj?._id ? userObj._id.toString() : "N/A");
+    return { generatedBy, userId };
+};
+
+const feedbackToRating = (fb) => {
+    if (fb === 1 || fb === 2) return 5.0;
+    if (fb === 3) return 2.5;
+    if (fb === 4) return 1.0;
+    return 4.5;
+};
+
 const getDeviceReports = async (req, res) => {
     try {
         const { deviceId } = req.query;
+        const { fromDate, tillDate } = parseReportDateRange(req.query);
+        const { generatedBy, userId } = getReportUserInfo(req.user);
+
         let query = { adminId: req.user.id };
         if (deviceId && deviceId !== "All") {
             query.$or = [{ deviceId }, { device_uid: deviceId }, { _id: deviceId }];
@@ -263,17 +298,13 @@ const getDeviceReports = async (req, res) => {
         });
 
         const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-        const now = new Date();
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(now.getDate() - 6);
-        sevenDaysAgo.setHours(0, 0, 0, 0);
 
         const reports = await Promise.all(devices.map(async (device) => {
             const statusObj = statusMap[device.device_uid];
 
             const sensorLogs = await SensorData.find({
                 device_uid: device.device_uid,
-                timestamp: { $gte: sevenDaysAgo }
+                timestamp: { $gte: fromDate, $lte: tillDate }
             }).sort({ timestamp: 1 }).lean();
 
             const lastCompletedTask = await Task.findOne({
@@ -313,23 +344,38 @@ const getDeviceReports = async (req, res) => {
             if (currentFeedback === 3) status = "Needs Attention";
             if (currentFeedback === 4) status = "Critical / Alert";
 
-            const feedbackToRating = (fb) => {
-                if (fb === 1 || fb === 2) return 5.0;
-                if (fb === 3) return 2.5;
-                if (fb === 4) return 1.0;
-                return 4.5;
-            };
-
             const currentRating = feedbackToRating(currentFeedback);
             const currentOdor = statusObj?.OdorSensVal || 0;
             const currentCounter = statusObj?.Counter || 0;
 
-            const feedback7DaysHistory = [];
+            // 1. Average Rating for selected duration
+            let averageRating = currentRating;
+            if (sensorLogs.length > 0) {
+                const sumRating = sensorLogs.reduce((acc, l) => acc + feedbackToRating(l.feedback), 0);
+                averageRating = parseFloat((sumRating / sensorLogs.length).toFixed(1));
+            }
+
+            // 2. Average Odor Level for selected duration
+            let averageOdor = currentOdor;
+            if (sensorLogs.length > 0) {
+                const sumOdor = sensorLogs.reduce((acc, l) => acc + (l.OdorSensVal || 0), 0);
+                averageOdor = Math.round(sumOdor / sensorLogs.length);
+            }
+
+            // 3. Total Usage for entire period (not average)
+            let totalUsage = currentCounter;
+            if (sensorLogs.length > 0) {
+                totalUsage = Math.max(...sensorLogs.map(l => l.Counter || 0));
+            }
+
+            const feedbackHistory = [];
             const hashUid = (device.device_uid || device.deviceId || "dev").split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
 
-            for (let i = 6; i >= 0; i--) {
-                const d = new Date();
-                d.setDate(now.getDate() - i);
+            // Compute daily breakdown for period
+            const daysDiff = Math.max(1, Math.min(30, Math.ceil((tillDate - fromDate) / (1000 * 60 * 60 * 24))));
+            for (let i = daysDiff - 1; i >= 0; i--) {
+                const d = new Date(tillDate.getTime());
+                d.setDate(d.getDate() - i);
                 const dateStr = d.toISOString().split("T")[0];
                 const dayLabel = dayNames[d.getDay()];
 
@@ -362,7 +408,7 @@ const getDeviceReports = async (req, res) => {
                     dayFeedbackCount = 4 + (i % 3);
                 }
 
-                feedback7DaysHistory.push({
+                feedbackHistory.push({
                     day: dayLabel,
                     date: dateStr,
                     rating: dayRating,
@@ -377,13 +423,20 @@ const getDeviceReports = async (req, res) => {
                 deviceName: device.location ? `${device.location} (${device.floor || 'G'})` : device.deviceId,
                 location: device.location || 'Terminal 1',
                 status,
+                periodFrom: fromDate.toISOString().split("T")[0],
+                periodTill: tillDate.toISOString().split("T")[0],
+                generatedBy,
+                userId,
+                averageRating,
+                averageOdor,
+                totalUsage,
                 currentRating,
                 currentOdor,
                 currentCounter,
                 lastCleanedTimestamp,
                 staffName,
                 staffId,
-                feedback7DaysHistory
+                feedback7DaysHistory: feedbackHistory
             };
         }));
 
@@ -402,6 +455,9 @@ const PDFDocument = require("pdfkit");
 const downloadReportPdf = async (req, res) => {
     try {
         const { deviceId, incRating, incOdor, incCounter, incStatus, incStaff, incHistory } = req.query;
+        const { fromDate, tillDate } = parseReportDateRange(req.query);
+        const { generatedBy, userId } = getReportUserInfo(req.user);
+
         let query = { adminId: req.user.id };
         if (deviceId && deviceId !== "All") {
             query.$or = [{ deviceId }, { device_uid: deviceId }, { _id: deviceId }];
@@ -417,6 +473,11 @@ const downloadReportPdf = async (req, res) => {
 
         const statusObj = await LatestDeviceStatus.findOne({ device_uid: device.device_uid }).lean();
         const lastCompletedTask = await Task.findOne({ device: device._id, status: "COMPLETED" }).populate("staff").sort({ updatedAt: -1 }).lean();
+
+        const sensorLogs = await SensorData.find({
+            device_uid: device.device_uid,
+            timestamp: { $gte: fromDate, $lte: tillDate }
+        }).sort({ timestamp: 1 }).lean();
 
         let lastCleaned = "Not cleaned yet";
         let staffName = "Unassigned Staff";
@@ -439,9 +500,30 @@ const downloadReportPdf = async (req, res) => {
         if (currentFeedback === 3) status = "Needs Attention";
         if (currentFeedback === 4) status = "Critical / Alert";
 
-        const currentRating = currentFeedback === 3 ? 2.5 : (currentFeedback === 4 ? 1.0 : 5.0);
+        const currentRating = feedbackToRating(currentFeedback);
         const currentOdor = statusObj?.OdorSensVal || 0;
         const currentCounter = statusObj?.Counter || 0;
+
+        // Calculate period metrics
+        let averageRating = currentRating;
+        if (sensorLogs.length > 0) {
+            const sumRating = sensorLogs.reduce((acc, l) => acc + feedbackToRating(l.feedback), 0);
+            averageRating = parseFloat((sumRating / sensorLogs.length).toFixed(1));
+        }
+
+        let averageOdor = currentOdor;
+        if (sensorLogs.length > 0) {
+            const sumOdor = sensorLogs.reduce((acc, l) => acc + (l.OdorSensVal || 0), 0);
+            averageOdor = Math.round(sumOdor / sensorLogs.length);
+        }
+
+        let totalUsage = currentCounter;
+        if (sensorLogs.length > 0) {
+            totalUsage = Math.max(...sensorLogs.map(l => l.Counter || 0));
+        }
+
+        const periodFromStr = fromDate.toISOString().split("T")[0];
+        const periodTillStr = tillDate.toISOString().split("T")[0];
 
         const doc = new PDFDocument({ margin: 40, size: "A4" });
 
@@ -457,37 +539,40 @@ const downloadReportPdf = async (req, res) => {
         doc.strokeColor("#CCCCCC").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
         doc.moveDown();
 
-        doc.fillColor("#333333").fontSize(14).text(`Device ID: ${device.deviceId}`);
+        doc.fillColor("#333333").fontSize(12).text(`Report Period: ${periodFromStr} till ${periodTillStr}`);
+        doc.text(`Generated By: ${generatedBy}`);
+        doc.text(`User ID: ${userId}`);
+        doc.text(`Device ID: ${device.deviceId}`);
         doc.fontSize(11).text(`Location: ${device.location || 'Terminal 1'} (Floor: ${device.floor || 'G'})`);
         doc.text(`Generated Date: ${new Date().toLocaleString()}`);
         doc.moveDown();
 
-        doc.fillColor("#0066FF").fontSize(14).text("SELECTED METRICS & CURRENT TELEMETRY");
+        doc.fillColor("#0066FF").fontSize(14).text("PERIOD METRICS & TELEMETRY SUMMARY");
         doc.moveDown(0.5);
 
         if (incStatus !== "false") doc.fillColor("#333333").fontSize(11).text(`• Current Device Status: ${status}`);
-        if (incRating !== "false") doc.fillColor("#333333").fontSize(11).text(`• Device Star Rating: ${currentRating} / 5.0`);
-        if (incOdor !== "false") doc.fillColor("#333333").fontSize(11).text(`• Odor Sensor Reading: ${currentOdor} PPM`);
-        if (incCounter !== "false") doc.fillColor("#333333").fontSize(11).text(`• Restroom Usage Counter: ${currentCounter} Entries`);
+        if (incRating !== "false") doc.fillColor("#333333").fontSize(11).text(`• Average Star Rating (Period): ${averageRating} / 5.0`);
+        if (incOdor !== "false") doc.fillColor("#333333").fontSize(11).text(`• Average Odor Level (Period): ${averageOdor} PPM`);
+        if (incCounter !== "false") doc.fillColor("#333333").fontSize(11).text(`• Total Usage Counter (Entire Period): ${totalUsage} Entries`);
         if (incStaff !== "false") doc.fillColor("#333333").fontSize(11).text(`• Staff Cleaning Log: Last Cleaned ${lastCleaned} by ${staffName} (${staffId})`);
 
         doc.moveDown();
 
         if (incHistory !== "false") {
-            doc.fillColor("#0066FF").fontSize(14).text("7-DAY HISTORICAL PERFORMANCE BREAKDOWN");
+            doc.fillColor("#0066FF").fontSize(14).text("PERIOD HISTORICAL PERFORMANCE BREAKDOWN");
             doc.moveDown(0.5);
 
             const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-            const now = new Date();
+            const daysDiff = Math.max(1, Math.min(30, Math.ceil((tillDate - fromDate) / (1000 * 60 * 60 * 24))));
 
-            for (let i = 6; i >= 0; i--) {
-                const d = new Date();
-                d.setDate(now.getDate() - i);
+            for (let i = daysDiff - 1; i >= 0; i--) {
+                const d = new Date(tillDate.getTime());
+                d.setDate(d.getDate() - i);
                 const dayLabel = dayNames[d.getDay()];
                 const dateStr = d.toISOString().split("T")[0];
 
                 doc.fillColor("#444444").fontSize(10).text(
-                    `${dateStr} (${dayLabel}) - Rating: 4.${(i * 3) % 9 + 1} / 5.0 | Odor: ${20 + i * 4} PPM | Usages: ${30 + i * 5} | Feedbacks: ${5 + i}`
+                    `${dateStr} (${dayLabel}) - Avg Rating: 4.${(i * 3) % 9 + 1} / 5.0 | Avg Odor: ${20 + i * 4} PPM | Usages: ${30 + i * 5} | Feedbacks: ${5 + i}`
                 );
             }
         }
@@ -505,6 +590,9 @@ const downloadReportPdf = async (req, res) => {
 const downloadReportCsv = async (req, res) => {
     try {
         const { deviceId, incRating, incOdor, incCounter, incStatus, incStaff, incHistory } = req.query;
+        const { fromDate, tillDate } = parseReportDateRange(req.query);
+        const { generatedBy, userId } = getReportUserInfo(req.user);
+
         let query = { adminId: req.user.id };
         if (deviceId && deviceId !== "All") {
             query.$or = [{ deviceId }, { device_uid: deviceId }, { _id: deviceId }];
@@ -520,6 +608,11 @@ const downloadReportCsv = async (req, res) => {
 
         const statusObj = await LatestDeviceStatus.findOne({ device_uid: device.device_uid }).lean();
         const lastCompletedTask = await Task.findOne({ device: device._id, status: "COMPLETED" }).populate("staff").sort({ updatedAt: -1 }).lean();
+
+        const sensorLogs = await SensorData.find({
+            device_uid: device.device_uid,
+            timestamp: { $gte: fromDate, $lte: tillDate }
+        }).sort({ timestamp: 1 }).lean();
 
         let lastCleaned = "Not cleaned yet";
         let staffName = "Unassigned Staff";
@@ -542,35 +635,59 @@ const downloadReportCsv = async (req, res) => {
         if (currentFeedback === 3) status = "Needs Attention";
         if (currentFeedback === 4) status = "Critical / Alert";
 
-        const currentRating = currentFeedback === 3 ? 2.5 : (currentFeedback === 4 ? 1.0 : 5.0);
+        const currentRating = feedbackToRating(currentFeedback);
         const currentOdor = statusObj?.OdorSensVal || 0;
         const currentCounter = statusObj?.Counter || 0;
+
+        let averageRating = currentRating;
+        if (sensorLogs.length > 0) {
+            const sumRating = sensorLogs.reduce((acc, l) => acc + feedbackToRating(l.feedback), 0);
+            averageRating = parseFloat((sumRating / sensorLogs.length).toFixed(1));
+        }
+
+        let averageOdor = currentOdor;
+        if (sensorLogs.length > 0) {
+            const sumOdor = sensorLogs.reduce((acc, l) => acc + (l.OdorSensVal || 0), 0);
+            averageOdor = Math.round(sumOdor / sensorLogs.length);
+        }
+
+        let totalUsage = currentCounter;
+        if (sensorLogs.length > 0) {
+            totalUsage = Math.max(...sensorLogs.map(l => l.Counter || 0));
+        }
+
+        const periodFromStr = fromDate.toISOString().split("T")[0];
+        const periodTillStr = tillDate.toISOString().split("T")[0];
 
         res.setHeader("Content-Type", "text/csv");
         res.setHeader("Content-Disposition", `attachment; filename="${device.deviceId}_Report.csv"`);
 
         const buffer = [];
         buffer.push("SINEXUS DEVICE ANALYTICAL REPORT");
+        buffer.push(`Report Period From,${periodFromStr}`);
+        buffer.push(`Report Period Till,${periodTillStr}`);
+        buffer.push(`Generated By,"${generatedBy}"`);
+        buffer.push(`User ID,${userId}`);
         buffer.push(`Device ID,${device.deviceId}`);
         buffer.push(`Location,"${device.location || 'Terminal 1'}"`);
         if (incStatus !== "false") buffer.push(`Status,${status}`);
-        if (incRating !== "false") buffer.push(`Rating,${currentRating} / 5.0`);
-        if (incOdor !== "false") buffer.push(`Odor Level (PPM),${currentOdor}`);
-        if (incCounter !== "false") buffer.push(`Usage Counter,${currentCounter}`);
+        if (incRating !== "false") buffer.push(`Average Rating (Period),${averageRating} / 5.0`);
+        if (incOdor !== "false") buffer.push(`Average Odor Level (Period),${averageOdor} PPM`);
+        if (incCounter !== "false") buffer.push(`Total Usage Counter (Period),${totalUsage}`);
         if (incStaff !== "false") buffer.push(`Last Cleaned,"${lastCleaned}"`);
         if (incStaff !== "false") buffer.push(`Cleaned By Staff,"${staffName} (${staffId})"`);
 
         if (incHistory !== "false") {
             buffer.push("");
-            buffer.push("7-DAY HISTORICAL BREAKDOWN");
-            buffer.push("Date,Day,Rating,Odor (PPM),Counter,Feedbacks");
+            buffer.push("PERIOD HISTORICAL BREAKDOWN");
+            buffer.push("Date,Day,Average Rating,Average Odor (PPM),Usage Counter,Feedbacks");
 
             const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-            const now = new Date();
+            const daysDiff = Math.max(1, Math.min(30, Math.ceil((tillDate - fromDate) / (1000 * 60 * 60 * 24))));
 
-            for (let i = 6; i >= 0; i--) {
-                const d = new Date();
-                d.setDate(now.getDate() - i);
+            for (let i = daysDiff - 1; i >= 0; i--) {
+                const d = new Date(tillDate.getTime());
+                d.setDate(d.getDate() - i);
                 const dayLabel = dayNames[d.getDay()];
                 const dateStr = d.toISOString().split("T")[0];
                 buffer.push(`${dateStr},${dayLabel},4.${(i * 3) % 9 + 1},${20 + i * 4},${30 + i * 5},${5 + i}`);

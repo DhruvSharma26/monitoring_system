@@ -101,10 +101,31 @@ const getToiletDetails = async (req, res) => {
             ratingHistory.push({ day: dayLabel, date: dateStr, value: dayRating });
         }
 
+        let averageRating = 5.0;
+        if (last7DaysSensorLogs.length > 0) {
+            const logsWithFeedback = last7DaysSensorLogs.filter(l => l.feedback !== undefined && l.feedback !== null);
+            if (logsWithFeedback.length > 0) {
+                const sum = logsWithFeedback.reduce((acc, l) => acc + feedbackToRating(l.feedback), 0);
+                averageRating = parseFloat((sum / logsWithFeedback.length).toFixed(1));
+            } else if (latestStatus && latestStatus.feedback !== undefined) {
+                averageRating = feedbackToRating(latestStatus.feedback);
+            }
+        } else if (latestStatus && latestStatus.feedback !== undefined) {
+            averageRating = feedbackToRating(latestStatus.feedback);
+        }
+
+        let totalUsage = latestStatus?.Counter || 0;
+        if (last7DaysSensorLogs.length > 0) {
+            const maxCounter = Math.max(...last7DaysSensorLogs.map(l => l.Counter || 0));
+            totalUsage = Math.max(totalUsage, maxCounter);
+        }
+
         res.status(200).json({
             success: true,
             device,
             status,
+            averageRating,
+            totalUsage,
             latestSensor: latestStatus || {
                 Counter: latestStatus?.Counter || 0,
                 OdorSensVal: latestStatus?.OdorSensVal || 0,

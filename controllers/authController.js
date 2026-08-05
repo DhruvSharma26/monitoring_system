@@ -126,7 +126,7 @@ const login = async (req, res, next) => {
         }
 
         const user =
-            await User.findOne(query);
+            await User.findOne(query).populate("assignedDevice");
 
         if (!user) {
 
@@ -180,10 +180,13 @@ const login = async (req, res, next) => {
             userId: user.userId,
             email: user.email,
             id: user._id,
+            name: user.name,
+            empId: user.empId,
             companyName: user.companyName,
             contactPerson: user.contactPerson,
             designation: user.designation,
-            mobile: user.mobile
+            mobile: user.mobile,
+            assignedDevice: user.assignedDevice
         });
 
     } catch (error) {
@@ -235,7 +238,9 @@ const logout = async (req, res, next) => {
 
 const getMe = async (req, res, next) => {
     try {
-        const user = await User.findById(req.user.id).select("-password -refreshToken");
+        const user = await User.findById(req.user.id)
+            .select("-password -refreshToken")
+            .populate("assignedDevice");
         if (!user) {
             return res.status(404).json({ success: false, message: "User not found" });
         }
