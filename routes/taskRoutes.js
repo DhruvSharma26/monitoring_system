@@ -36,7 +36,20 @@ router.get("/:taskId/timeline", getTaskTimeline);
 router.post("/:taskId/start", startTask);
 
 // Staff Upload Cleaning Photos (Accepts array of 3 to 5 images)
-router.post("/:taskId/upload-photos", upload.array("photos", 5), uploadTaskPhotos);
+const handlePhotoUpload = (req, res, next) => {
+    upload.array("photos", 5)(req, res, (err) => {
+        if (err) {
+            console.error("❌ Task Photo Upload Middleware Error:", err);
+            return res.status(400).json({
+                success: false,
+                message: err.message || "Failed to upload task photos to server."
+            });
+        }
+        next();
+    });
+};
+
+router.post("/:taskId/upload-photos", handlePhotoUpload, uploadTaskPhotos);
 
 // Staff Submit Task (Requires >= 10 mins elapsed)
 router.post("/submit", submitTask);

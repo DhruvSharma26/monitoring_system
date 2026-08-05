@@ -59,6 +59,8 @@ app.use(express.json());
 const path = require("path");
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 connectDB();
+const { startCleanupJob } = require("./services/cleanupService");
+startCleanupJob();
 
 app.use(helmet());
 app.use((req, res, next) => {

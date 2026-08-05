@@ -80,14 +80,20 @@ const upload = multer({
 function getFileUrl(file, req) {
     if (!file) return "";
 
-    if (process.env.STORAGE_PROVIDER === "s3" && file.location) {
-        return file.location; // AWS S3 URL
+    if (process.env.STORAGE_PROVIDER === "s3") {
+        if (file.location) return file.location;
+        if (file.key) {
+            const bucket = process.env.AWS_BUCKET_NAME || "sinexus-image-bucket";
+            const region = process.env.AWS_REGION || "ap-south-1";
+            return `https://${bucket}.s3.${region}.amazonaws.com/${file.key}`;
+        }
     }
 
     // Local Storage URL
     const host = req ? req.get("host") : "localhost:5000";
     const protocol = req ? req.protocol : "http";
-    return `${protocol}://${host}/uploads/task-photos/${file.filename}`;
+    const fname = file.filename || (file.path ? path.basename(file.path) : "");
+    return `${protocol}://${host}/uploads/task-photos/${fname}`;
 }
 
 module.exports = {
