@@ -14,14 +14,16 @@ const getToilets = async (req, res) => {
     try {
         const { status } = req.query;
 
-        const [devices, statuses, allSensorLogs, completedTasks] = await Promise.all([
-            Device.find({ adminId: req.user.id }).sort({ createdAt: -1 }).lean(),
+        const User = require("../models/User");
+        const [devices, statuses, allSensorLogs, completedTasks, allStaff] = await Promise.all([
+            Device.find({ adminId: req.user.id }).populate("assignedStaff", "name empId userId").sort({ createdAt: -1 }).lean(),
             LatestDeviceStatus.find().lean(),
             SensorData.find().sort({ timestamp: 1 }).lean(),
             Task.find({ status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] } })
                 .populate("staff", "name empId userId")
                 .sort({ updatedAt: -1 })
-                .lean()
+                .lean(),
+            User.find({ role: "staff" }).select("name empId userId assignedDevice").lean()
         ]);
 
         const statusMap = {};
@@ -33,6 +35,23 @@ const getToilets = async (req, res) => {
 
         for (const device of devices) {
             const latestStatus = statusMap[device.device_uid] || {};
+
+            let assignedStaffName = "";
+            let assignedStaffUserId = "";
+            let assignedStaffEmpId = "";
+
+            if (device.assignedStaff) {
+                assignedStaffName = device.assignedStaff.name || "";
+                assignedStaffUserId = device.assignedStaff.userId || "";
+                assignedStaffEmpId = device.assignedStaff.empId || "";
+            } else {
+                const assignedUser = allStaff.find(s => String(s.assignedDevice) === String(device._id));
+                if (assignedUser) {
+                    assignedStaffName = assignedUser.name || "";
+                    assignedStaffUserId = assignedUser.userId || "";
+                    assignedStaffEmpId = assignedUser.empId || "";
+                }
+            }
 
             let toiletStatus = "clean";
             if (latestStatus.feedback === 3) {
@@ -118,6 +137,9 @@ const getToilets = async (req, res) => {
                 latitude: device.latitude,
                 longitude: device.longitude,
                 timestamp: latestStatus.timestamp || device.createdAt,
+                assignedStaffName: assignedStaffName,
+                assignedStaffUserId: assignedStaffUserId,
+                assignedStaffEmpId: assignedStaffEmpId,
                 lastCleanedAt: lastCleanedAt,
                 lastCleanedByStaffName: lastCleanedByStaffName,
                 lastCleanedByStaffUserId: lastCleanedByStaffUserId,

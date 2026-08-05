@@ -316,7 +316,26 @@ const verifyTask = async (req, res) => {
 // Get My Tasks (Staff)
 const getMyTasks = async (req, res) => {
     try {
-        const tasks = await Task.find({ staff: req.user.id })
+        let staffQueryId = req.user ? req.user.id : null;
+        const requestedId = req.params.staffId || req.query.staffId;
+
+        if (requestedId) {
+            const staffObj = await User.findOne({
+                $or: [
+                    { userId: requestedId },
+                    { empId: requestedId },
+                    { email: requestedId }
+                ]
+            });
+            if (staffObj) {
+                staffQueryId = staffObj._id;
+            } else if (requestedId.match(/^[0-9a-fA-F]{24}$/)) {
+                staffQueryId = requestedId;
+            }
+        }
+
+        const query = staffQueryId ? { staff: staffQueryId } : {};
+        const tasks = await Task.find(query)
             .populate("device")
             .sort({ createdAt: -1 });
 

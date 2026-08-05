@@ -24,6 +24,7 @@ router.post("/assign", assignTask);
 
 // Staff Get My Tasks
 router.get("/my-tasks", getMyTasks);
+router.get("/my-tasks/:staffId", getMyTasks);
 
 // Admin Get All Tasks & Live Progress
 router.get("/all", getAllTasksForAdmin);

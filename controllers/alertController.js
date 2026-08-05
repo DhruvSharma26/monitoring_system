@@ -24,8 +24,22 @@ const getAlerts = async (req, res) => {
 
         }
 
-        // Filter alerts by admin's devices
-        const myDevices = await Device.find({ adminId: req.user.id }).select("device_uid deviceId location floor").lean();
+        // Filter alerts by user role (admin devices vs staff assigned devices)
+        let myDevices = [];
+        if (req.user && req.user.role === 'staff') {
+            const staffUser = await User.findById(req.user.id);
+            const assignedDevId = staffUser ? staffUser.assignedDevice : null;
+            
+            myDevices = await Device.find({
+                $or: [
+                    { assignedStaff: req.user.id },
+                    ...(assignedDevId ? [{ _id: assignedDevId }] : [])
+                ]
+            }).select("device_uid deviceId location floor").lean();
+        } else {
+            myDevices = await Device.find({ adminId: req.user.id }).select("device_uid deviceId location floor").lean();
+        }
+
         const myDeviceUids = myDevices.map(d => d.device_uid);
         const deviceMap = {};
         myDevices.forEach(d => {
