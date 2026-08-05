@@ -10,6 +10,8 @@ const registerDevice = async (req, res) => {
             deviceCategory,
             deviceModelNumber,
             location,
+            locationName,
+            address,
             floor,
             tabLocation,
             latitude,
@@ -17,21 +19,26 @@ const registerDevice = async (req, res) => {
             installationDate
         } = req.body;
 
+        const locName = (locationName || location || "DEV").trim();
+        const locAddress = (address || location || locName).trim();
+
         const count = await Device.countDocuments({
-            location,
-            floor
+            $or: [
+                { locationName: locName, floor },
+                { location: locName, floor }
+            ]
         });
 
-        const cleanLoc = (location || "DEV").replace(/[^a-zA-Z0-9]/g, "");
-        const cleanFloor = (floor || "F1").replace(/\s/g, "");
-        const deviceId = `${cleanLoc}-${cleanFloor}-${String(count + 1).padStart(2, "0")}`;
+        const cleanLoc = locName.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+        const cleanFloor = (floor || "F1").replace(/\s/g, "").toUpperCase();
+        const deviceId = `${cleanLoc || "DEV"}-${cleanFloor}-${String(count + 1).padStart(2, "0")}`;
 
         let resolvedLat = latitude !== undefined && latitude !== null ? Number(latitude) : undefined;
         let resolvedLng = longitude !== undefined && longitude !== null ? Number(longitude) : undefined;
 
-        // Auto-geocode location via Google Maps API to fetch real geographical coordinates if not provided
-        if ((resolvedLat === undefined || resolvedLng === undefined) && location) {
-            const geocoded = await googleMapsService.geocodeAddress(location);
+        // Auto-geocode address via Google Maps API to fetch real geographical coordinates if not provided
+        if ((resolvedLat === undefined || resolvedLng === undefined) && locAddress) {
+            const geocoded = await googleMapsService.geocodeAddress(locAddress);
             if (geocoded) {
                 resolvedLat = geocoded.lat;
                 resolvedLng = geocoded.lng;
@@ -44,9 +51,11 @@ const registerDevice = async (req, res) => {
             adminId: req.user.id,
             deviceCategory,
             deviceModelNumber,
-            location,
+            locationName: locName,
+            address: locAddress,
+            location: locAddress || locName,
             floor,
-            tabLocation: tabLocation || location,
+            tabLocation: tabLocation || locName,
             latitude: resolvedLat,
             longitude: resolvedLng,
             installationDate

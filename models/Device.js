@@ -21,6 +21,10 @@ const deviceSchema = new mongoose.Schema(
 
     deviceModelNumber: String,
 
+    locationName: String,
+
+    address: String,
+
     location: String,
 
     floor: String,

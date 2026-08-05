@@ -1,6 +1,6 @@
 const Otp = require("../models/Otp");
-const nodemailer = require("nodemailer");
 const crypto = require("crypto");
+const { sendEmail } = require("../services/emailService");
 
 const sendOtp = async (req, res, next) => {
     try {
@@ -28,23 +28,9 @@ const sendOtp = async (req, res, next) => {
             expiresAt: expiry
         });
 
-        const transporter = nodemailer.createTransport({
-            host: "smtp.gmail.com",
-            port: 465,
-            secure: true,
-            auth: {
-                user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_PASS
-            },
-            tls: {
-                rejectUnauthorized: false
-            }
-        });
+        console.log(`📧 [OTP GENERATED] OTP ${otp} generated for ${email}`);
 
-        console.log(`📧 [OTP SENT] Sending OTP ${otp} to ${email}`);
-
-        await transporter.sendMail({
-            from: `"Sinexus Monitoring" <${process.env.EMAIL_USER}>`,
+        await sendEmail({
             to: email,
             subject: "Sinexus - Email Verification OTP",
             text: `Your OTP for Sinexus email verification is: ${otp}. This OTP is valid for 5 minutes.`,

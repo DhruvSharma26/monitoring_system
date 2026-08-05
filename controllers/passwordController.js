@@ -1,8 +1,8 @@
 const User = require("../models/User");
 const Otp = require("../models/Otp");
 const bcrypt = require("bcryptjs");
-const nodemailer = require("nodemailer");
 const crypto = require("crypto");
+const { sendEmail } = require("../services/emailService");
 
 const sendForgotOtp = async (req, res, next) => {
 
@@ -36,22 +36,20 @@ const sendForgotOtp = async (req, res, next) => {
             expiresAt: expiry
         });
 
-        const transporter =
-            nodemailer.createTransport({
-                host: "smtp.gmail.com",
-                port: 465,
-                secure: true,
-                auth: {
-                    user: process.env.EMAIL_USER,
-                    pass: process.env.EMAIL_PASS
-                }
-            });
-
-        await transporter.sendMail({
-            from: process.env.EMAIL_USER,
+        await sendEmail({
             to: email,
-            subject: "Password Reset OTP",
-            text: `Your OTP is ${otp}`
+            subject: "Sinexus - Password Reset OTP",
+            text: `Your OTP for Sinexus password reset is: ${otp}. This OTP is valid for 5 minutes.`,
+            html: `
+                <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+                    <h2 style="color: #1565C0;">Sinexus Password Reset</h2>
+                    <p>Use the following OTP to reset your password:</p>
+                    <div style="font-size: 24px; font-weight: bold; letter-spacing: 4px; color: #1565C0; background: #f0f4f8; padding: 12px 20px; display: inline-block; border-radius: 8px;">
+                        ${otp}
+                    </div>
+                    <p style="margin-top: 20px; font-size: 12px; color: #777;">This OTP will expire in 5 minutes.</p>
+                </div>
+            `
         });
 
         res.status(200).json({
