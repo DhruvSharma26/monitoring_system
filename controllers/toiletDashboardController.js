@@ -73,6 +73,7 @@ const getToilets = async (req, res) => {
             const deviceTask = completedTasks.find(t => String(t.device) === String(device._id));
             let lastCleanedAt = "";
             let lastCleanedByStaffName = "";
+            let lastCleanedByStaffUserId = "";
             let lastCleanedByStaffEmpId = "";
 
             if (deviceTask) {
@@ -88,7 +89,8 @@ const getToilets = async (req, res) => {
                 }
                 if (deviceTask.staff) {
                     lastCleanedByStaffName = deviceTask.staff.name || "";
-                    lastCleanedByStaffEmpId = deviceTask.staff.empId || deviceTask.staff.userId || "";
+                    lastCleanedByStaffUserId = deviceTask.staff.userId || "";
+                    lastCleanedByStaffEmpId = deviceTask.staff.empId || "";
                 }
             } else if (latestStatus && latestStatus.timestamp) {
                 lastCleanedAt = new Date(latestStatus.timestamp).toLocaleString("en-US", {
@@ -118,6 +120,7 @@ const getToilets = async (req, res) => {
                 timestamp: latestStatus.timestamp || device.createdAt,
                 lastCleanedAt: lastCleanedAt,
                 lastCleanedByStaffName: lastCleanedByStaffName,
+                lastCleanedByStaffUserId: lastCleanedByStaffUserId,
                 lastCleanedByStaffEmpId: lastCleanedByStaffEmpId
             });
         }

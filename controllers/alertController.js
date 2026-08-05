@@ -25,8 +25,13 @@ const getAlerts = async (req, res) => {
         }
 
         // Filter alerts by admin's devices
-        const myDevices = await Device.find({ adminId: req.user.id }).select("device_uid");
+        const myDevices = await Device.find({ adminId: req.user.id }).select("device_uid deviceId location floor").lean();
         const myDeviceUids = myDevices.map(d => d.device_uid);
+        const deviceMap = {};
+        myDevices.forEach(d => {
+            deviceMap[d.device_uid] = d;
+        });
+
         query.device_uid = { $in: myDeviceUids };
 
         const alerts = await Alert.find(query).sort({ createdAt: -1 }).lean();
@@ -43,6 +48,15 @@ const getAlerts = async (req, res) => {
                     continue;
                 }
                 seenActiveDevices.add(alertItem.device_uid);
+            }
+
+            const devInfo = deviceMap[alertItem.device_uid];
+            if (devInfo) {
+                alertItem.deviceId = devInfo.deviceId || alertItem.device_uid;
+                alertItem.deviceLocation = `${devInfo.location || ''}${devInfo.floor ? ' - Floor ' + devInfo.floor : ''}`;
+            } else {
+                alertItem.deviceId = alertItem.device_uid;
+                alertItem.deviceLocation = alertItem.device_uid;
             }
 
             const task = await Task.findOne({ alert: alertItem._id }).populate("staff", "name empId userId");

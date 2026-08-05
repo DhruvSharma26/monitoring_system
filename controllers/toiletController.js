@@ -40,6 +40,7 @@ const getToiletDetails = async (req, res) => {
 
         let lastCleanedByStaff = "Not yet cleaned today";
         let lastCleanedByStaffName = "";
+        let lastCleanedByStaffUserId = "";
         let lastCleanedByStaffEmpId = "";
 
         if (lastCompletedTask) {
@@ -55,7 +56,8 @@ const getToiletDetails = async (req, res) => {
             }
             if (lastCompletedTask.staff) {
                 lastCleanedByStaffName = lastCompletedTask.staff.name || "";
-                lastCleanedByStaffEmpId = lastCompletedTask.staff.empId || lastCompletedTask.staff.userId || "";
+                lastCleanedByStaffUserId = lastCompletedTask.staff.userId || "";
+                lastCleanedByStaffEmpId = lastCompletedTask.staff.empId || "";
             }
         } else if (latestStatus && latestStatus.timestamp) {
             lastCleanedByStaff = new Date(latestStatus.timestamp).toLocaleString("en-US", {
@@ -145,6 +147,7 @@ const getToiletDetails = async (req, res) => {
             currentOdor: latestStatus?.OdorSensVal || 0,
             lastCleanedByStaff,
             lastCleanedByStaffName,
+            lastCleanedByStaffUserId,
             lastCleanedByStaffEmpId,
             weeklyAnalysis: {
                 counterHistory,
