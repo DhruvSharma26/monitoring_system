@@ -289,13 +289,20 @@ if (global.io) {
     });
     console.log(`🚨 Alert Created: ${alertType} for device ${sensorPayload.device_uid}`);
     
-    global.io.emit("new_alert", {
+    const dev = await Device.findOne({ device_uid: sensorPayload.device_uid });
+    const alertSocketData = {
       device_uid: sensorPayload.device_uid,
       alert_id: newAlert._id,
       type: alertType,
       message: alertMessage,
       feedback: sensorPayload.feedback
-    });
+    };
+    if (dev && dev.adminId) {
+      global.io.to(`user_${dev.adminId}`).emit("new_alert", alertSocketData);
+    }
+    if (dev && dev.assignedStaff) {
+      global.io.to(`user_${dev.assignedStaff}`).emit("new_alert", alertSocketData);
+    }
 
     // Send notifications to Admin and Assigned Staff (FCM Push, DB, Socket, Email)
     notificationService.handleMqttAlertNotification(sensorPayload, alertType, newAlert);

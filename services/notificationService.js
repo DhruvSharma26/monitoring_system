@@ -6,7 +6,7 @@ const { sendPushNotification } = require("../config/firebase");
 
 /**
  * Handle notification dispatch when an alert is created from MQTT feedback/sensor data.
- * Notifies Admin(s) and Assigned Staff via FCM Push, MongoDB Notification, Socket.io, and Email.
+ * Notifies ONLY the specific Admin who registered the device and the Assigned Staff.
  */
 async function handleMqttAlertNotification(sensorPayload, alertType, alertDoc) {
     try {
@@ -15,11 +15,20 @@ async function handleMqttAlertNotification(sensorPayload, alertType, alertDoc) {
         // 1. Locate Device details
         const device = await Device.findOne({ device_uid: deviceUid });
 
-        // 2. Identify Recipient Users
+        // 2. Identify Recipient Users (Targeted ONLY to Admin who registered the device & Assigned Staff)
         const recipientUserIds = new Set();
         const recipients = [];
 
-        // A. Find Assigned Staff
+        // A. Find Admin who registered this specific device
+        if (device && device.adminId) {
+            const adminUser = await User.findById(device.adminId);
+            if (adminUser) {
+                recipientUserIds.add(adminUser._id.toString());
+                recipients.push(adminUser);
+            }
+        }
+
+        // B. Find Assigned Staff for this specific device
         let assignedStaffUser = null;
         if (device && device.assignedStaff) {
             assignedStaffUser = await User.findById(device.assignedStaff);
@@ -27,31 +36,22 @@ async function handleMqttAlertNotification(sensorPayload, alertType, alertDoc) {
         if (!assignedStaffUser && device) {
             assignedStaffUser = await User.findOne({ role: "staff", assignedDevice: device._id });
         }
-        if (assignedStaffUser) {
+        if (assignedStaffUser && !recipientUserIds.has(assignedStaffUser._id.toString())) {
             recipientUserIds.add(assignedStaffUser._id.toString());
             recipients.push(assignedStaffUser);
         }
 
-        // B. Find Admin(s)
-        if (device && device.adminId) {
-            const adminUser = await User.findById(device.adminId);
-            if (adminUser && !recipientUserIds.has(adminUser._id.toString())) {
-                recipientUserIds.add(adminUser._id.toString());
-                recipients.push(adminUser);
-            }
-        }
-
-        // Fallback: If no specific admin was attached to device, notify all Admin users
-        const allAdmins = await User.find({ role: "admin" });
-        for (const adminUser of allAdmins) {
-            if (!recipientUserIds.has(adminUser._id.toString())) {
-                recipientUserIds.add(adminUser._id.toString());
-                recipients.push(adminUser);
+        // Fallback ONLY if device has no registered admin (legacy/unassigned devices)
+        if (recipients.length === 0 && (!device || !device.adminId)) {
+            const firstAdmin = await User.findOne({ role: "admin" });
+            if (firstAdmin) {
+                recipientUserIds.add(firstAdmin._id.toString());
+                recipients.push(firstAdmin);
             }
         }
 
         if (recipients.length === 0) {
-            console.log(`⚠️ No admin or assigned staff found to notify for device ${deviceUid}`);
+            console.log(`⚠️ No registered admin or assigned staff found to notify for device ${deviceUid}`);
             return;
         }
 
@@ -66,7 +66,7 @@ async function handleMqttAlertNotification(sensorPayload, alertType, alertDoc) {
         const details = [locationText, feedbackText, odorText, counterText].filter(Boolean).join(" | ");
         const message = `Alert [${humanAlertType}] created for device ${deviceUid}. (${details})`;
 
-        // 4. Dispatch Notifications to each Recipient (Admin & Staff)
+        // 4. Dispatch Notifications ONLY to targeted Recipients (Device Admin & Assigned Staff)
         for (const user of recipients) {
             // A. Save Notification to Database
             const dbNotification = await Notification.create({
@@ -104,7 +104,7 @@ async function handleMqttAlertNotification(sensorPayload, alertType, alertDoc) {
                 });
             }
 
-            // C. Socket.io Real-time Event Emission
+            // C. Socket.io Real-time Event Emission (Targeted strictly to user's private socket room)
             if (global.io) {
                 const socketPayload = {
                     notificationId: dbNotification._id,
@@ -119,8 +119,7 @@ async function handleMqttAlertNotification(sensorPayload, alertType, alertDoc) {
                     createdAt: dbNotification.createdAt
                 };
 
-                // Broadcast globally & emit to user specific room
-                global.io.emit("new_notification", socketPayload);
+                global.io.to(`user_${user._id}`).emit("new_notification", socketPayload);
                 global.io.to(`user_${user._id}`).emit("user_notification", socketPayload);
             }
 
@@ -179,9 +178,9 @@ async function sendTaskAssignedNotification(taskDoc, staffUser, adminUser, devic
             });
         }
 
-        // Socket emission
+        // Targeted Socket emission
         if (global.io) {
-            global.io.emit("new_notification", dbNotification);
+            global.io.to(`user_${staffUser._id}`).emit("new_notification", dbNotification);
             global.io.to(`user_${staffUser._id}`).emit("user_notification", dbNotification);
         }
     } catch (error) {
@@ -189,6 +188,10 @@ async function sendTaskAssignedNotification(taskDoc, staffUser, adminUser, devic
     }
 }
 
+/**
+ * Send notification when staff submits a task.
+ * Notifies ONLY the specific Admin who assigned the task or registered the device.
+ */
 async function sendTaskSubmittedNotification(taskDoc, staffUser, deviceDoc) {
     try {
         const title = "📋 Task Submitted for Review";
@@ -200,9 +203,9 @@ async function sendTaskSubmittedNotification(taskDoc, staffUser, deviceDoc) {
             const admin = await User.findById(taskDoc.assignedBy);
             if (admin) recipients.push(admin);
         }
-        if (recipients.length === 0) {
-            const allAdmins = await User.find({ role: "admin" });
-            recipients.push(...allAdmins);
+        if (recipients.length === 0 && deviceDoc && deviceDoc.adminId) {
+            const admin = await User.findById(deviceDoc.adminId);
+            if (admin) recipients.push(admin);
         }
 
         for (const adminUser of recipients) {
@@ -234,9 +237,9 @@ async function sendTaskSubmittedNotification(taskDoc, staffUser, deviceDoc) {
                 });
             }
 
-            // Socket emission
+            // Targeted Socket emission
             if (global.io) {
-                global.io.emit("new_notification", dbNotification);
+                global.io.to(`user_${adminUser._id}`).emit("new_notification", dbNotification);
                 global.io.to(`user_${adminUser._id}`).emit("user_notification", dbNotification);
             }
         }
@@ -245,6 +248,10 @@ async function sendTaskSubmittedNotification(taskDoc, staffUser, deviceDoc) {
     }
 }
 
+/**
+ * Send notification when admin verifies a task.
+ * Notifies ONLY the assigned staff member.
+ */
 async function sendTaskVerifiedNotification(taskDoc, staffUser, adminUser, deviceDoc) {
     try {
         if (!staffUser) return;
@@ -281,9 +288,9 @@ async function sendTaskVerifiedNotification(taskDoc, staffUser, adminUser, devic
             });
         }
 
-        // Socket emission
+        // Targeted Socket emission
         if (global.io) {
-            global.io.emit("new_notification", dbNotification);
+            global.io.to(`user_${staffUser._id}`).emit("new_notification", dbNotification);
             global.io.to(`user_${staffUser._id}`).emit("user_notification", dbNotification);
         }
     } catch (error) {
