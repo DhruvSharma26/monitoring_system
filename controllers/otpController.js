@@ -1,11 +1,11 @@
 const Otp = require("../models/Otp");
+const User = require("../models/User");
 const crypto = require("crypto");
 const { sendEmail } = require("../services/emailService");
 
 const sendOtp = async (req, res, next) => {
     try {
-
-        const { email } = req.body;
+        const { email, type } = req.body;
 
         if (!email) {
             return res.status(400).json({
@@ -14,30 +14,45 @@ const sendOtp = async (req, res, next) => {
             });
         }
 
+        const normalizedEmail = email.toLowerCase().trim();
+
+        // If OTP is requested for registration, check if user already exists
+        const existingUser = await User.findOne({ email: normalizedEmail });
+        if (existingUser) {
+            return res.status(400).json({
+                success: false,
+                message: "An account with this email address already exists. Please login instead."
+            });
+        }
+
         const otp = crypto.randomInt(100000, 999999).toString();
+        const expiry = new Date(Date.now() + 5 * 60 * 1000);
 
-        const expiry = new Date(
-            Date.now() + 5 * 60 * 1000
-        );
-
-        await Otp.deleteMany({ email });
+        await Otp.deleteMany({ email: normalizedEmail });
 
         await Otp.create({
-            email,
+            email: normalizedEmail,
             otp,
             expiresAt: expiry
         });
 
-        console.log(`📧 [OTP GENERATED] OTP ${otp} generated for ${email}`);
+        console.log(`📧 [OTP GENERATED] OTP ${otp} generated for ${normalizedEmail} (Type: ${type || 'general'})`);
+
+        let contextText = "registration";
+        if (type === "admin") {
+            contextText = "admin registration";
+        } else if (type === "staff") {
+            contextText = "staff registration";
+        }
 
         await sendEmail({
-            to: email,
-            subject: "Sinexus - Email Verification OTP",
-            text: `Your OTP for Sinexus email verification is: ${otp}. This OTP is valid for 5 minutes.`,
+            to: normalizedEmail,
+            subject: `Sinexus - Email Verification OTP`,
+            text: `Your OTP for Sinexus ${contextText} is: ${otp}. This OTP is valid for 5 minutes.`,
             html: `
                 <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
                     <h2 style="color: #1565C0;">Sinexus Email Verification</h2>
-                    <p>Use the following OTP to verify your email address during staff registration:</p>
+                    <p>Use the following OTP to verify your email address during ${contextText}:</p>
                     <div style="font-size: 24px; font-weight: bold; letter-spacing: 4px; color: #1565C0; background: #f0f4f8; padding: 12px 20px; display: inline-block; border-radius: 8px;">
                         ${otp}
                     </div>
@@ -48,7 +63,7 @@ const sendOtp = async (req, res, next) => {
 
         res.status(200).json({
             success: true,
-            message: `OTP sent successfully to ${email}`
+            message: `OTP sent successfully to ${normalizedEmail}`
         });
 
     } catch (error) {
@@ -57,14 +72,22 @@ const sendOtp = async (req, res, next) => {
 };
 
 const verifyOtp = async (req, res, next) => {
-
     try {
-
         const { email, otp } = req.body;
 
+        if (!email || !otp) {
+            return res.status(400).json({
+                success: false,
+                message: "Email and OTP are required"
+            });
+        }
+
+        const normalizedEmail = email.toLowerCase().trim();
+        const trimmedOtp = otp.toString().trim();
+
         const otpRecord = await Otp.findOne({
-            email,
-            otp
+            email: normalizedEmail,
+            otp: trimmedOtp
         });
 
         if (!otpRecord) {
@@ -75,16 +98,13 @@ const verifyOtp = async (req, res, next) => {
         }
 
         if (otpRecord.expiresAt < new Date()) {
-
             return res.status(400).json({
                 success: false,
                 message: "OTP Expired"
             });
-
         }
 
         otpRecord.verified = true;
-
         await otpRecord.save();
 
         res.status(200).json({

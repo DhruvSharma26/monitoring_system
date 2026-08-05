@@ -20,8 +20,17 @@ const registerAdmin = async (req, res, next) => {
             password
         } = req.body;
 
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                message: "Email is required"
+            });
+        }
+
+        const normalizedEmail = email.toLowerCase().trim();
+
         const verifiedOtp = await Otp.findOne({
-            email,
+            email: normalizedEmail,
             verified: true
         });
 
@@ -34,8 +43,15 @@ const registerAdmin = async (req, res, next) => {
 
         }
 
+        if (verifiedOtp.expiresAt < new Date()) {
+            return res.status(400).json({
+                success: false,
+                message: "Verified OTP has expired. Please verify again."
+            });
+        }
+
         const existingUser = await User.findOne({
-            email
+            email: normalizedEmail
         });
 
         if (existingUser) {
@@ -77,7 +93,7 @@ const registerAdmin = async (req, res, next) => {
 
             designation,
 
-            email,
+            email: normalizedEmail,
 
             mobile,
 
@@ -87,6 +103,8 @@ const registerAdmin = async (req, res, next) => {
 
             isVerified: true
         });
+
+        await Otp.deleteMany({ email: normalizedEmail });
 
         res.status(201).json({
             success: true,

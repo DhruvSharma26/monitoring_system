@@ -17,7 +17,16 @@ const registerStaff = async (req, res) => {
             password
         } = req.body;
 
-        const verifiedOtp = await Otp.findOne({ email, verified: true });
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                message: "Email address is required"
+            });
+        }
+
+        const normalizedEmail = email.toLowerCase().trim();
+
+        const verifiedOtp = await Otp.findOne({ email: normalizedEmail, verified: true });
         if (!verifiedOtp) {
             return res.status(400).json({
                 success: false,
@@ -25,22 +34,30 @@ const registerStaff = async (req, res) => {
             });
         }
 
-        const existingStaff =
-            await User.findOne({ empId });
-
-        if (existingStaff) {
-
+        if (verifiedOtp.expiresAt < new Date()) {
             return res.status(400).json({
                 success: false,
-                message: "Employee already exists"
+                message: "Verified OTP has expired. Please verify staff email again."
             });
-
         }
 
-        const staffCount =
-            await User.countDocuments({
-                role: "staff"
+        const existingEmpId = await User.findOne({ empId });
+        if (existingEmpId) {
+            return res.status(400).json({
+                success: false,
+                message: "Employee with this Emp ID already exists"
             });
+        }
+
+        const existingEmail = await User.findOne({ email: normalizedEmail });
+        if (existingEmail) {
+            return res.status(400).json({
+                success: false,
+                message: "Employee with this email address already exists"
+            });
+        }
+
+        const staffCount = await User.countDocuments({ role: "staff" });
             
         if (staffCount >= 2) {
             return res.status(400).json({
@@ -49,41 +66,35 @@ const registerStaff = async (req, res) => {
             });
         }
 
-        const staffId =
-            "STF" +
-            String(staffCount + 1)
-            .padStart(3, "0");
+        const staffId = "STF" + String(staffCount + 1).padStart(3, "0");
 
-        const device =
-            await Device.findOne({ _id: deviceId, adminId: req.user.id });
+        const device = await Device.findOne({ _id: deviceId, adminId: req.user.id });
 
         if (!device) {
-
             return res.status(404).json({
                 success: false,
                 message: "Device not found or not authorized"
             });
-
         }
 
-        const hashedPassword =
-            await bcrypt.hash(password, 10);
+        const hashedPassword = await bcrypt.hash(password, 10);
 
         const staff = await User.create({
-    userId: staffId,
-    role: "staff",
-    name,
-    email,
-    mobile,
-    empId,
-    designation,
-    assignedDevice: device._id,
-    password: hashedPassword,
-    isVerified: true
-});
+            userId: staffId,
+            role: "staff",
+            name,
+            email: normalizedEmail,
+            mobile,
+            empId,
+            designation,
+            assignedDevice: device._id,
+            password: hashedPassword,
+            isVerified: true
+        });
+
+        await Otp.deleteMany({ email: normalizedEmail });
 
         device.assignedStaff = staff._id;
-
         await device.save();
 
         res.status(201).json({
@@ -94,11 +105,18 @@ const registerStaff = async (req, res) => {
 
     } catch (error) {
 
-        console.log(error);
+        console.log("Error registering staff:", error);
+
+        if (error.code === 11000) {
+            return res.status(400).json({
+                success: false,
+                message: "Staff with this email or Employee ID already exists"
+            });
+        }
 
         res.status(500).json({
             success: false,
-            message: "Server Error"
+            message: error.message || "Server Error"
         });
 
     }

@@ -24,10 +24,10 @@ const authLimiter = rateLimit({
     legacyHeaders: false,
 });
 
-// Stricter limiter for OTP generation routes (e.g. 5 requests per 15 minutes)
+// Stricter limiter for OTP generation routes (e.g. 15 requests per 15 minutes)
 const otpLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 5,
+    max: 15,
     message: {
         success: false,
         message: "Too many OTP requests from this IP, please try again after 15 minutes"

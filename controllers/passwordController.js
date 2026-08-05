@@ -5,39 +5,41 @@ const crypto = require("crypto");
 const { sendEmail } = require("../services/emailService");
 
 const sendForgotOtp = async (req, res, next) => {
-
     try {
-
         const { email } = req.body;
 
-        const user = await User.findOne({ email });
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                message: "Email is required"
+            });
+        }
+
+        const normalizedEmail = email.toLowerCase().trim();
+        const user = await User.findOne({ email: normalizedEmail });
 
         if (!user) {
-
             return res.status(404).json({
                 success: false,
                 message: "User not found"
             });
-
         }
 
         const otp = crypto.randomInt(100000, 999999).toString();
+        const expiry = new Date(Date.now() + 5 * 60 * 1000);
 
-        const expiry =
-            new Date(
-                Date.now() + 5 * 60 * 1000
-            );
-
-        await Otp.deleteMany({ email });
+        await Otp.deleteMany({ email: normalizedEmail });
 
         await Otp.create({
-            email,
+            email: normalizedEmail,
             otp,
             expiresAt: expiry
         });
 
+        console.log(`📧 [FORGOT OTP GENERATED] OTP ${otp} generated for ${normalizedEmail}`);
+
         await sendEmail({
-            to: email,
+            to: normalizedEmail,
             subject: "Sinexus - Password Reset OTP",
             text: `Your OTP for Sinexus password reset is: ${otp}. This OTP is valid for 5 minutes.`,
             html: `
@@ -60,41 +62,42 @@ const sendForgotOtp = async (req, res, next) => {
     } catch (error) {
         next(error);
     }
-
 };
 
 const verifyForgotOtp = async (req, res, next) => {
-
     try {
-
         const { email, otp } = req.body;
 
-        const otpRecord =
-            await Otp.findOne({
-                email,
-                otp
+        if (!email || !otp) {
+            return res.status(400).json({
+                success: false,
+                message: "Email and OTP are required"
             });
+        }
+
+        const normalizedEmail = email.toLowerCase().trim();
+        const trimmedOtp = otp.toString().trim();
+
+        const otpRecord = await Otp.findOne({
+            email: normalizedEmail,
+            otp: trimmedOtp
+        });
 
         if (!otpRecord) {
-
             return res.status(400).json({
                 success: false,
                 message: "Invalid OTP"
             });
-
         }
 
         if (otpRecord.expiresAt < new Date()) {
-
             return res.status(400).json({
                 success: false,
                 message: "OTP Expired"
             });
-
         }
 
         otpRecord.verified = true;
-
         await otpRecord.save();
 
         res.status(200).json({
@@ -105,50 +108,53 @@ const verifyForgotOtp = async (req, res, next) => {
     } catch (error) {
         next(error);
     }
-
 };
 
 const resetPassword = async (req, res, next) => {
-
     try {
+        const { email, newPassword } = req.body;
 
-        const {
-            email,
-            newPassword
-        } = req.body;
-
-        const otpRecord =
-            await Otp.findOne({
-                email,
-                verified: true
+        if (!email || !newPassword) {
+            return res.status(400).json({
+                success: false,
+                message: "Email and new password are required"
             });
+        }
+
+        const normalizedEmail = email.toLowerCase().trim();
+
+        const otpRecord = await Otp.findOne({
+            email: normalizedEmail,
+            verified: true
+        });
 
         if (!otpRecord) {
-
             return res.status(400).json({
                 success: false,
                 message: "Verify OTP First"
             });
-
         }
 
-        const user =
-            await User.findOne({ email });
+        if (otpRecord.expiresAt < new Date()) {
+            return res.status(400).json({
+                success: false,
+                message: "OTP Expired. Please request a new OTP."
+            });
+        }
 
-        const hashedPassword =
-            await bcrypt.hash(
-                newPassword,
-                10
-            );
+        const user = await User.findOne({ email: normalizedEmail });
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
 
-        user.password =
-            hashedPassword;
-
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        user.password = hashedPassword;
         await user.save();
 
-        await Otp.deleteMany({
-            email
-        });
+        await Otp.deleteMany({ email: normalizedEmail });
 
         res.status(200).json({
             success: true,
@@ -158,7 +164,6 @@ const resetPassword = async (req, res, next) => {
     } catch (error) {
         next(error);
     }
-
 };
 
 module.exports = {
