@@ -30,11 +30,17 @@ const getAlerts = async (req, res) => {
             const staffUser = await User.findById(req.user.id);
             const assignedDevId = staffUser ? staffUser.assignedDevice : null;
             
+            const devConditions = [
+                { assignedStaff: req.user.id }
+            ];
+            if (assignedDevId) {
+                devConditions.push({ _id: assignedDevId });
+                devConditions.push({ device_uid: assignedDevId });
+                devConditions.push({ deviceId: assignedDevId });
+            }
+
             myDevices = await Device.find({
-                $or: [
-                    { assignedStaff: req.user.id },
-                    ...(assignedDevId ? [{ _id: assignedDevId }] : [])
-                ]
+                $or: devConditions
             }).select("device_uid deviceId location floor").lean();
         } else {
             myDevices = await Device.find({ adminId: req.user.id }).select("device_uid deviceId location floor").lean();
@@ -57,6 +63,40 @@ const getAlerts = async (req, res) => {
         for (let i = 0; i < alerts.length; i++) {
             const alertItem = alerts[i];
             
+            const task = await Task.findOne({ alert: alertItem._id }).populate("staff", "name empId userId");
+            if (task) {
+                alertItem.taskId = task._id;
+                alertItem.taskStatus = task.status;
+                alertItem.taskProgressPercent = (task.status === "VERIFIED" || task.status === "COMPLETED" || task.status === "RESOLVED") 
+                    ? 100 
+                    : (task.progressPercent || 0);
+
+                if (task.status === "VERIFIED" || task.status === "COMPLETED" || task.status === "RESOLVED") {
+                    alertItem.status = "RESOLVED";
+                }
+
+                let photos = [];
+                if (Array.isArray(task.cleaningPhotos) && task.cleaningPhotos.length > 0) {
+                    photos = task.cleaningPhotos.map(p => typeof p === "string" ? p : (p.url || p.path || ""));
+                }
+                if (photos.length === 0) {
+                    if (task.beforeCleaningPhoto) photos.push(task.beforeCleaningPhoto);
+                    if (task.afterCleaningPhoto) photos.push(task.afterCleaningPhoto);
+                }
+                alertItem.taskCleaningPhotos = photos.filter(Boolean);
+
+                alertItem.assignedAt = task.assignedAt;
+                alertItem.startedAt = task.startedAt;
+                alertItem.photosUploadedAt = task.photosUploadedAt;
+                alertItem.submittedAt = task.submittedAt;
+                alertItem.completedAt = task.completedAt;
+                alertItem.verifiedAt = task.verifiedAt;
+                if (task.staff) {
+                    alertItem.assignedStaffName = task.staff.name;
+                    alertItem.assignedStaffEmpId = task.staff.empId || task.staff.userId || "";
+                }
+            }
+
             // Exclude resolved alerts older than 15 days
             if (alertItem.status === "RESOLVED") {
                 const resolvedDate = alertItem.verifiedAt || alertItem.completedAt || alertItem.updatedAt || alertItem.createdAt;
@@ -82,43 +122,6 @@ const getAlerts = async (req, res) => {
                 alertItem.deviceLocation = alertItem.device_uid;
             }
 
-            const task = await Task.findOne({ alert: alertItem._id }).populate("staff", "name empId userId");
-            if (task) {
-                // Exclude if task itself was resolved > 15 days ago
-                if (task.status === "VERIFIED" || task.status === "COMPLETED" || task.status === "RESOLVED") {
-                    const taskResolvedDate = task.verifiedAt || task.completedAt || task.submittedAt || task.updatedAt;
-                    if (taskResolvedDate && new Date(taskResolvedDate) < fifteenDaysAgo) {
-                        continue;
-                    }
-                }
-
-                alertItem.taskId = task._id;
-                alertItem.taskStatus = task.status;
-                alertItem.taskProgressPercent = (task.status === "VERIFIED" || task.status === "COMPLETED" || task.status === "RESOLVED") 
-                    ? 100 
-                    : (task.progressPercent || 0);
-
-                let photos = [];
-                if (Array.isArray(task.cleaningPhotos) && task.cleaningPhotos.length > 0) {
-                    photos = task.cleaningPhotos.map(p => typeof p === "string" ? p : (p.url || p.path || ""));
-                }
-                if (photos.length === 0) {
-                    if (task.beforeCleaningPhoto) photos.push(task.beforeCleaningPhoto);
-                    if (task.afterCleaningPhoto) photos.push(task.afterCleaningPhoto);
-                }
-                alertItem.taskCleaningPhotos = photos.filter(Boolean);
-
-                alertItem.assignedAt = task.assignedAt;
-                alertItem.startedAt = task.startedAt;
-                alertItem.photosUploadedAt = task.photosUploadedAt;
-                alertItem.submittedAt = task.submittedAt;
-                alertItem.completedAt = task.completedAt;
-                alertItem.verifiedAt = task.verifiedAt;
-                if (task.staff) {
-                    alertItem.assignedStaffName = task.staff.name;
-                    alertItem.assignedStaffEmpId = task.staff.empId || task.staff.userId || "";
-                }
-            }
             latestAlerts.push(alertItem);
         }
 

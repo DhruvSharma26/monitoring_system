@@ -67,70 +67,99 @@ const getDashboard = async (req, res) => {
                 ).toFixed(1)
                 : 0;
 
-        // Generate mock data for the charts since we don't have aggregation pipelines yet
-        const usage_data = [
-            { label: "Mon", count: 120 },
-            { label: "Tue", count: 150 },
-            { label: "Wed", count: 180 },
-            { label: "Thu", count: 90 },
-            { label: "Fri", count: 210 },
-            { label: "Sat", count: 300 },
-            { label: "Sun", count: 250 }
-        ];
+        // Compute real dynamic usage_data and weekly_ratings from last 7 days sensor logs
+        const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+        const now = new Date();
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(now.getDate() - 6);
+        sevenDaysAgo.setHours(0, 0, 0, 0);
 
-        const weekly_ratings = [
-            { day: "Mon", rating: 4.2 },
-            { day: "Tue", rating: 4.5 },
-            { day: "Wed", rating: 3.8 },
-            { day: "Thu", rating: 4.0 },
-            { day: "Fri", rating: 4.7 },
-            { day: "Sat", rating: 3.5 },
-            { day: "Sun", rating: 4.1 }
-        ];
+        const allUids = devices.flatMap(d => [d.device_uid, d.deviceId].filter(Boolean));
+        const sensorLogs = await SensorData.find({
+            device_uid: { $in: allUids },
+            timestamp: { $gte: sevenDaysAgo }
+        }).lean();
 
-        const total_feedbacks = await SensorData.countDocuments({
-            device_uid: { $in: devices.map(d => d.device_uid) }
-        });
+        const feedbackToRating = (fb) => {
+            if (fb === 1 || fb === 2) return 5.0;
+            if (fb === 3) return 2.5;
+            if (fb === 4) return 1.0;
+            return 5.0;
+        };
 
-        res.status(200).json({
+        const usage_data = [];
+        const weekly_ratings = [];
 
-            success: true,
+        for (let i = 6; i >= 0; i--) {
+            const dayStart = new Date();
+            dayStart.setDate(now.getDate() - i);
+            dayStart.setHours(0, 0, 0, 0);
 
-            dashboard: {
+            const dayEnd = new Date();
+            dayEnd.setDate(now.getDate() - i);
+            dayEnd.setHours(23, 59, 59, 999);
 
-                totalToilets,
+            const dayLabel = dayNames[dayStart.getDay()];
 
-                cleanToilets: clean,
+            const dayLogs = sensorLogs.filter(log => {
+                const logTime = new Date(log.timestamp).getTime();
+                return logTime >= dayStart.getTime() && logTime <= dayEnd.getTime();
+            });
 
-                attentionToilets:
-                    attention,
-
-                criticalToilets:
-                    critical,
-
-                averageRating,
-
-                total_feedbacks,
-
-                usage_data,
-
-                weekly_ratings,
-
-                liveAlerts
-
+            // Daily usage count across all toilets
+            let dayUsageTotal = 0;
+            if (dayLogs.length > 0) {
+                // Group by device and get max counter per device on that day
+                const deviceMap = {};
+                for (const log of dayLogs) {
+                    const du = log.device_uid;
+                    const c = Number(log.Counter) || 0;
+                    if (!deviceMap[du] || c > deviceMap[du]) {
+                        deviceMap[du] = c;
+                    }
+                }
+                dayUsageTotal = Object.values(deviceMap).reduce((a, b) => a + b, 0);
             }
 
+            // Daily average rating across all toilets
+            let dayRatingAvg = 0.0;
+            if (dayLogs.length > 0) {
+                const explicitFeedbackLogs = dayLogs.filter(l => l.feedback !== undefined && l.feedback !== null && Number(l.feedback) > 0);
+                if (explicitFeedbackLogs.length > 0) {
+                    const sum = explicitFeedbackLogs.reduce((acc, l) => acc + feedbackToRating(Number(l.feedback)), 0);
+                    dayRatingAvg = parseFloat((sum / explicitFeedbackLogs.length).toFixed(1));
+                } else {
+                    const highOdorLogs = dayLogs.filter(l => (Number(l.OdorSensVal) || 0) >= 80);
+                    dayRatingAvg = highOdorLogs.length > 0 ? 1.0 : 5.0;
+                }
+            }
+
+            usage_data.push({ label: dayLabel, count: dayUsageTotal });
+            weekly_ratings.push({ day: dayLabel, rating: dayRatingAvg });
+        }
+
+        const total_feedbacks = sensorLogs.length;
+
+        res.status(200).json({
+            success: true,
+            dashboard: {
+                totalToilets,
+                cleanToilets: clean,
+                attentionToilets: attention,
+                criticalToilets: critical,
+                averageRating,
+                total_feedbacks,
+                usage_data,
+                weekly_ratings,
+                liveAlerts
+            }
         });
-
     } catch (error) {
-
         console.error(error);
-
         res.status(500).json({
             success: false,
             message: "Server Error"
         });
-
     }
 };
 
@@ -498,7 +527,11 @@ const getAttentionCriticalToilets =
 
 const getToiletRatingComparison = async (req, res) => {
     try {
-        const devices = await Device.find({ adminId: req.user.id }).sort({ createdAt: -1 }).lean();
+        let devices = await Device.find({ adminId: req.user.id }).sort({ createdAt: -1 }).lean();
+        if (!devices || devices.length === 0) {
+            devices = await Device.find().sort({ createdAt: -1 }).lean();
+        }
+
         const statuses = await LatestDeviceStatus.find().lean();
         const statusMap = {};
         statuses.forEach(item => {
@@ -511,8 +544,9 @@ const getToiletRatingComparison = async (req, res) => {
         sevenDaysAgo.setDate(now.getDate() - 6);
         sevenDaysAgo.setHours(0, 0, 0, 0);
 
+        const allUids = devices.flatMap(d => [d.device_uid, d.deviceId].filter(Boolean));
         const sensorLogs = await SensorData.find({
-            device_uid: { $in: devices.map(d => d.device_uid) },
+            device_uid: { $in: allUids },
             timestamp: { $gte: sevenDaysAgo }
         }).lean();
 
@@ -520,36 +554,47 @@ const getToiletRatingComparison = async (req, res) => {
             if (fb === 1 || fb === 2) return 5.0;
             if (fb === 3) return 2.5;
             if (fb === 4) return 1.0;
-            return 4.5;
+            return 5.0;
         };
 
         const toiletData = devices.map((device, index) => {
-            const devLogs = sensorLogs.filter(log => log.device_uid === device.device_uid);
-            const statusObj = statusMap[device.device_uid];
+            const devLogs = sensorLogs.filter(log => log.device_uid === device.device_uid || log.device_uid === device.deviceId);
+            const statusObj = statusMap[device.device_uid] || statusMap[device.deviceId];
 
             const dailyRatings = [];
             let sumRating = 0;
             let ratingCount = 0;
 
             for (let i = 6; i >= 0; i--) {
-                const d = new Date();
-                d.setDate(now.getDate() - i);
-                const dateStr = d.toISOString().split("T")[0];
-                const dayLabel = dayNames[d.getDay()];
+                const dayStart = new Date();
+                dayStart.setDate(now.getDate() - i);
+                dayStart.setHours(0, 0, 0, 0);
+
+                const dayEnd = new Date();
+                dayEnd.setDate(now.getDate() - i);
+                dayEnd.setHours(23, 59, 59, 999);
+
+                const dateStr = dayStart.toISOString().split("T")[0];
+                const dayLabel = dayNames[dayStart.getDay()];
 
                 const dayLogs = devLogs.filter(log => {
-                    const logDate = new Date(log.timestamp).toISOString().split("T")[0];
-                    return logDate === dateStr;
+                    const logTime = new Date(log.timestamp).getTime();
+                    return logTime >= dayStart.getTime() && logTime <= dayEnd.getTime();
                 });
 
-                let dayRating;
+                let dayRating = 0.0;
                 if (dayLogs.length > 0) {
-                    const daySum = dayLogs.reduce((acc, log) => acc + feedbackToRating(log.feedback), 0);
-                    dayRating = parseFloat((daySum / dayLogs.length).toFixed(1));
+                    const explicitLogs = dayLogs.filter(l => l.feedback !== undefined && l.feedback !== null && Number(l.feedback) > 0);
+                    if (explicitLogs.length > 0) {
+                        const daySum = explicitLogs.reduce((acc, log) => acc + feedbackToRating(Number(log.feedback)), 0);
+                        dayRating = parseFloat((daySum / explicitLogs.length).toFixed(1));
+                    } else {
+                        const highOdor = dayLogs.some(l => (Number(l.OdorSensVal) || 0) >= 80);
+                        const warningOdor = dayLogs.some(l => (Number(l.OdorSensVal) || 0) >= 50);
+                        dayRating = highOdor ? 1.0 : (warningOdor ? 2.5 : 5.0);
+                    }
                     sumRating += dayRating;
                     ratingCount++;
-                } else {
-                    dayRating = 0.0;
                 }
 
                 dailyRatings.push({
@@ -559,12 +604,12 @@ const getToiletRatingComparison = async (req, res) => {
                 });
             }
 
-            const avgRating = ratingCount > 0 ? parseFloat((sumRating / ratingCount).toFixed(1)) : 0.0;
+            const avgRating = ratingCount > 0 ? parseFloat((sumRating / ratingCount).toFixed(1)) : 5.0;
 
             let status = "clean";
             if (statusObj) {
-                if (statusObj.feedback === 3) status = "attention";
-                else if (statusObj.feedback === 4) status = "critical";
+                if (statusObj.feedback === 3 || statusObj.OdorSensVal >= 50) status = "attention";
+                if (statusObj.feedback === 4 || statusObj.OdorSensVal >= 80) status = "critical";
             }
 
             return {
@@ -572,7 +617,7 @@ const getToiletRatingComparison = async (req, res) => {
                 deviceId: device.deviceId || device.device_uid,
                 location: device.location || "Unknown Location",
                 averageRating: avgRating,
-                totalFeedbacks: devLogs.length > 0 ? devLogs.length : Math.floor(15 + ((index * 13) % 25)),
+                totalFeedbacks: devLogs.length,
                 status,
                 dailyRatings
             };

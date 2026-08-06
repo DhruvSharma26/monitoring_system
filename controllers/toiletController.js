@@ -9,7 +9,13 @@ const Task = require("../models/Task");
 const getToiletDetails = async (req, res) => {
     try {
         const { deviceId } = req.params;
-        const device = await Device.findOne({ deviceId }).lean();
+        const isObjectId = mongoose.Types.ObjectId.isValid(deviceId);
+        const device = await Device.findOne({
+            $or: isObjectId
+                ? [{ _id: deviceId }, { deviceId }, { device_uid: deviceId }]
+                : [{ deviceId }, { device_uid: deviceId }]
+        }).lean();
+
         if (!device) {
             return res.status(404).json({ success: false, message: "Device not found" });
         }
@@ -20,13 +26,15 @@ const getToiletDetails = async (req, res) => {
         sevenDaysAgo.setDate(now.getDate() - 6);
         sevenDaysAgo.setHours(0, 0, 0, 0);
 
+        const targetUids = [device.device_uid, device.deviceId].filter(Boolean);
+
         const [latestStatus, alerts, tasks, staff, last7DaysSensorLogs, lastCompletedTask] = await Promise.all([
-            LatestDeviceStatus.findOne({ device_uid: device.device_uid }).lean(),
-            Alert.find({ device_uid: device.device_uid }).sort({ createdAt: -1 }).limit(10).lean(),
+            LatestDeviceStatus.findOne({ device_uid: { $in: targetUids } }).lean(),
+            Alert.find({ device_uid: { $in: targetUids } }).sort({ createdAt: -1 }).limit(10).lean(),
             Task.find({ device: device._id }).populate("staff").sort({ createdAt: -1 }),
             User.findOne({ assignedDevice: device._id }).lean(),
             SensorData.find({
-                device_uid: device.device_uid,
+                device_uid: { $in: targetUids },
                 timestamp: { $gte: sevenDaysAgo }
             }).sort({ timestamp: 1 }).lean(),
             Task.findOne({ device: device._id, status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] } }).populate("staff", "name empId userId").sort({ updatedAt: -1 }).lean()
@@ -34,8 +42,8 @@ const getToiletDetails = async (req, res) => {
 
         let status = "clean";
         if (latestStatus) {
-            if (latestStatus.feedback === 3) status = "warning";
-            else if (latestStatus.feedback === 4) status = "critical";
+            if (latestStatus.feedback === 3 || latestStatus.OdorSensVal >= 50) status = "warning";
+            if (latestStatus.feedback === 4 || latestStatus.OdorSensVal >= 80) status = "critical";
         }
 
         let lastCleanedByStaff = "Not yet cleaned today";
@@ -73,39 +81,62 @@ const getToiletDetails = async (req, res) => {
             if (fb === 1 || fb === 2) return 5.0;
             if (fb === 3) return 2.5;
             if (fb === 4) return 1.0;
-            return 4.5;
+            return 5.0;
         };
 
         const counterHistory = [];
         const odorHistory = [];
         const ratingHistory = [];
 
-        const hashUid = (device.device_uid || device.deviceId || "dev").split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
-
         for (let i = 6; i >= 0; i--) {
-            const d = new Date();
-            d.setDate(now.getDate() - i);
-            const dateStr = d.toISOString().split("T")[0];
-            const dayLabel = dayNames[d.getDay()];
+            const dayStart = new Date();
+            dayStart.setDate(now.getDate() - i);
+            dayStart.setHours(0, 0, 0, 0);
+
+            const dayEnd = new Date();
+            dayEnd.setDate(now.getDate() - i);
+            dayEnd.setHours(23, 59, 59, 999);
+
+            const dateStr = dayStart.toISOString().split("T")[0];
+            const dayLabel = dayNames[dayStart.getDay()];
 
             const dayLogs = last7DaysSensorLogs.filter(log => {
-                const logDate = new Date(log.timestamp).toISOString().split("T")[0];
-                return logDate === dateStr;
+                const logTime = new Date(log.timestamp).getTime();
+                return logTime >= dayStart.getTime() && logTime <= dayEnd.getTime();
             });
 
-            let dayCounter, dayOdor, dayRating;
+            let dayCounter = 0;
+            let dayOdor = 0;
+            let dayRating = 0.0;
 
             if (dayLogs.length > 0) {
-                dayCounter = Math.max(...dayLogs.map(l => l.Counter || 0));
-                const sumOdor = dayLogs.reduce((acc, l) => acc + (l.OdorSensVal || 0), 0);
+                // Safely compute max counter without spread operator
+                for (const l of dayLogs) {
+                    const c = Number(l.Counter) || 0;
+                    if (c > dayCounter) dayCounter = c;
+                }
+
+                // Average odor
+                let sumOdor = 0;
+                for (const l of dayLogs) {
+                    sumOdor += Number(l.OdorSensVal) || 0;
+                }
                 dayOdor = Math.round(sumOdor / dayLogs.length);
-                const sumRating = dayLogs.reduce((acc, l) => acc + feedbackToRating(l.feedback), 0);
-                dayRating = parseFloat((sumRating / dayLogs.length).toFixed(1));
+
+                // Rating calculation
+                const explicitLogs = dayLogs.filter(l => l.feedback !== undefined && l.feedback !== null && Number(l.feedback) > 0);
+                if (explicitLogs.length > 0) {
+                    const sumRating = explicitLogs.reduce((acc, l) => acc + feedbackToRating(Number(l.feedback)), 0);
+                    dayRating = parseFloat((sumRating / explicitLogs.length).toFixed(1));
+                } else {
+                    const highOdor = dayLogs.some(l => (Number(l.OdorSensVal) || 0) >= 80);
+                    const warningOdor = dayLogs.some(l => (Number(l.OdorSensVal) || 0) >= 50);
+                    dayRating = highOdor ? 1.0 : (warningOdor ? 2.5 : 5.0);
+                }
             } else {
-                // REAL DYNAMIC DATA: No sensor logs for this day -> 0 (No fake static numbers)
                 dayCounter = 0;
                 dayOdor = 0;
-                dayRating = 0;
+                dayRating = 0.0;
             }
 
             counterHistory.push({ day: dayLabel, date: dateStr, value: dayCounter });
@@ -115,21 +146,21 @@ const getToiletDetails = async (req, res) => {
 
         let averageRating = 5.0;
         if (last7DaysSensorLogs.length > 0) {
-            const logsWithFeedback = last7DaysSensorLogs.filter(l => l.feedback !== undefined && l.feedback !== null);
+            const logsWithFeedback = last7DaysSensorLogs.filter(l => l.feedback !== undefined && l.feedback !== null && Number(l.feedback) > 0);
             if (logsWithFeedback.length > 0) {
-                const sum = logsWithFeedback.reduce((acc, l) => acc + feedbackToRating(l.feedback), 0);
+                const sum = logsWithFeedback.reduce((acc, l) => acc + feedbackToRating(Number(l.feedback)), 0);
                 averageRating = parseFloat((sum / logsWithFeedback.length).toFixed(1));
-            } else if (latestStatus && latestStatus.feedback !== undefined) {
+            } else if (latestStatus && latestStatus.feedback !== undefined && latestStatus.feedback > 0) {
                 averageRating = feedbackToRating(latestStatus.feedback);
             }
-        } else if (latestStatus && latestStatus.feedback !== undefined) {
+        } else if (latestStatus && latestStatus.feedback !== undefined && latestStatus.feedback > 0) {
             averageRating = feedbackToRating(latestStatus.feedback);
         }
 
         let totalUsage = latestStatus?.Counter || 0;
-        if (last7DaysSensorLogs.length > 0) {
-            const maxCounter = Math.max(...last7DaysSensorLogs.map(l => l.Counter || 0));
-            totalUsage = Math.max(totalUsage, maxCounter);
+        for (const l of last7DaysSensorLogs) {
+            const c = Number(l.Counter) || 0;
+            if (c > totalUsage) totalUsage = c;
         }
 
         res.status(200).json({

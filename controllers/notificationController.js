@@ -147,10 +147,27 @@ const deleteNotification = async (req, res, next) => {
     }
 };
 
+// Clear all notifications for logged-in user
+const deleteAllNotifications = async (req, res, next) => {
+    try {
+        const userId = req.user.id;
+
+        await Notification.deleteMany({ recipient: userId });
+
+        res.status(200).json({
+            success: true,
+            message: "All notifications cleared"
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     updateFcmToken,
     getUserNotifications,
     markAsRead,
     markAllAsRead,
-    deleteNotification
+    deleteNotification,
+    deleteAllNotifications
 };
