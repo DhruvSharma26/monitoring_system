@@ -66,11 +66,6 @@ const calculateDailyBreakdown = (sensorLogs, fromDate, tillDate, statusObj) => {
     const history = [];
     const daysDiff = Math.max(1, Math.min(60, Math.ceil((tillDate - fromDate) / (1000 * 60 * 60 * 24))));
 
-    const currentFeedback = statusObj?.feedback || 1;
-    const fallbackRating = feedbackToRating(currentFeedback);
-    const fallbackOdor = statusObj?.OdorSensVal || 0;
-    const fallbackCounter = statusObj?.Counter || 0;
-
     for (let i = daysDiff - 1; i >= 0; i--) {
         const d = new Date(tillDate.getTime());
         d.setDate(d.getDate() - i);
@@ -82,34 +77,27 @@ const calculateDailyBreakdown = (sensorLogs, fromDate, tillDate, statusObj) => {
             return logDate === dateStr;
         });
 
-        let dayRating, dayOdor, dayCounter, dayFeedbackCount;
         if (dayLogs.length > 0) {
             const sumRating = dayLogs.reduce((acc, l) => acc + feedbackToRating(l.feedback), 0);
-            dayRating = parseFloat((sumRating / dayLogs.length).toFixed(1));
+            const dayRating = parseFloat((sumRating / dayLogs.length).toFixed(1));
             const sumOdor = dayLogs.reduce((acc, l) => acc + (l.OdorSensVal || 0), 0);
-            dayOdor = Math.round(sumOdor / dayLogs.length);
-            dayCounter = 0;
+            const dayOdor = Math.round(sumOdor / dayLogs.length);
+            let dayCounter = 0;
             for (const l of dayLogs) {
                 const c = Number(l.Counter) || 0;
                 if (c > dayCounter) dayCounter = c;
             }
-            dayFeedbackCount = dayLogs.length;
-        } else {
-            // Authentic fallback: Use latest device telemetry state for days without explicit logs
-            dayRating = fallbackRating;
-            dayOdor = fallbackOdor;
-            dayCounter = fallbackCounter;
-            dayFeedbackCount = 0;
-        }
+            const dayFeedbackCount = dayLogs.length;
 
-        history.push({
-            day: dayLabel,
-            date: dateStr,
-            rating: dayRating,
-            odor: dayOdor,
-            counter: dayCounter,
-            totalFeedback: dayFeedbackCount
-        });
+            history.push({
+                day: dayLabel,
+                date: dateStr,
+                rating: dayRating,
+                odor: dayOdor,
+                counter: dayCounter,
+                totalFeedback: dayFeedbackCount
+            });
+        }
     }
 
     return history;
@@ -413,22 +401,24 @@ const getDeviceReports = async (req, res) => {
             const currentOdor = statusObj?.OdorSensVal || 0;
             const currentCounter = statusObj?.Counter || 0;
 
-            let averageRating = currentRating;
+            let averageRating = 0;
             if (sensorLogs.length > 0) {
                 const sumRating = sensorLogs.reduce((acc, l) => acc + feedbackToRating(l.feedback), 0);
                 averageRating = parseFloat((sumRating / sensorLogs.length).toFixed(1));
             }
 
-            let averageOdor = currentOdor;
+            let averageOdor = 0;
             if (sensorLogs.length > 0) {
                 const sumOdor = sensorLogs.reduce((acc, l) => acc + (l.OdorSensVal || 0), 0);
                 averageOdor = Math.round(sumOdor / sensorLogs.length);
             }
 
-            let totalUsage = currentCounter;
-            for (const l of sensorLogs) {
-                const c = Number(l.Counter) || 0;
-                if (c > totalUsage) totalUsage = c;
+            let totalUsage = 0;
+            if (sensorLogs.length > 0) {
+                for (const l of sensorLogs) {
+                    const c = Number(l.Counter) || 0;
+                    if (c > totalUsage) totalUsage = c;
+                }
             }
 
             const feedbackHistory = calculateDailyBreakdown(sensorLogs, fromDate, tillDate, statusObj);
@@ -522,22 +512,24 @@ const downloadReportPdf = async (req, res) => {
         const currentOdor = statusObj?.OdorSensVal || 0;
         const currentCounter = statusObj?.Counter || 0;
 
-        let averageRating = currentRating;
+        let averageRating = 0;
         if (sensorLogs.length > 0) {
             const sumRating = sensorLogs.reduce((acc, l) => acc + feedbackToRating(l.feedback), 0);
             averageRating = parseFloat((sumRating / sensorLogs.length).toFixed(1));
         }
 
-        let averageOdor = currentOdor;
+        let averageOdor = 0;
         if (sensorLogs.length > 0) {
             const sumOdor = sensorLogs.reduce((acc, l) => acc + (l.OdorSensVal || 0), 0);
             averageOdor = Math.round(sumOdor / sensorLogs.length);
         }
 
-        let totalUsage = currentCounter;
-        for (const l of sensorLogs) {
-            const c = Number(l.Counter) || 0;
-            if (c > totalUsage) totalUsage = c;
+        let totalUsage = 0;
+        if (sensorLogs.length > 0) {
+            for (const l of sensorLogs) {
+                const c = Number(l.Counter) || 0;
+                if (c > totalUsage) totalUsage = c;
+            }
         }
 
         const periodFromStr = fromDate.toISOString().split("T")[0];
@@ -653,22 +645,24 @@ const downloadReportCsv = async (req, res) => {
         const currentOdor = statusObj?.OdorSensVal || 0;
         const currentCounter = statusObj?.Counter || 0;
 
-        let averageRating = currentRating;
+        let averageRating = 0;
         if (sensorLogs.length > 0) {
             const sumRating = sensorLogs.reduce((acc, l) => acc + feedbackToRating(l.feedback), 0);
             averageRating = parseFloat((sumRating / sensorLogs.length).toFixed(1));
         }
 
-        let averageOdor = currentOdor;
+        let averageOdor = 0;
         if (sensorLogs.length > 0) {
             const sumOdor = sensorLogs.reduce((acc, l) => acc + (l.OdorSensVal || 0), 0);
             averageOdor = Math.round(sumOdor / sensorLogs.length);
         }
 
-        let totalUsage = currentCounter;
-        for (const l of sensorLogs) {
-            const c = Number(l.Counter) || 0;
-            if (c > totalUsage) totalUsage = c;
+        let totalUsage = 0;
+        if (sensorLogs.length > 0) {
+            for (const l of sensorLogs) {
+                const c = Number(l.Counter) || 0;
+                if (c > totalUsage) totalUsage = c;
+            }
         }
 
         const periodFromStr = fromDate.toISOString().split("T")[0];

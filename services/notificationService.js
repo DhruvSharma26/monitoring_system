@@ -246,7 +246,8 @@ async function sendTaskVerifiedNotification(taskDoc, staffUser, adminUser, devic
 
         const title = "✅ Task Verified Clean";
         const deviceUid = deviceDoc ? deviceDoc.device_uid : "N/A";
-        const message = `Admin ${adminUser ? adminUser.name : 'Admin'} has verified your task for device ${deviceUid} (${deviceDoc?.location || ''}).`;
+        const adminDisplayName = (adminUser && (adminUser.name || adminUser.contactPersonName)) ? (adminUser.name || adminUser.contactPersonName) : 'Admin';
+        const message = `Admin ${adminDisplayName} has verified your task for device ${deviceUid} (${deviceDoc?.location || ''}).`;
 
         // Save DB Notification
         const dbNotification = await Notification.create({
