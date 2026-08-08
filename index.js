@@ -288,33 +288,34 @@ if (global.io) {
   }
 
   if (alertType) {
-    const newAlert = await Alert.create({
+    const alertService = require("./services/alertService");
+    const { alert: alertDoc, device: dev, isOverwritten } = await alertService.processOrCreateDeviceAlert({
       device_uid: sensorPayload.device_uid,
       alertType: alertType,
       feedback: sensorPayload.feedback,
       Counter: sensorPayload.Counter,
-      OdorSensVal: sensorPayload.OdorSensVal,
-      status: "OPEN"
+      OdorSensVal: sensorPayload.OdorSensVal
     });
-    console.log(`🚨 Alert Created: ${alertType} for device ${sensorPayload.device_uid}`);
-    
-    const dev = await Device.findOne({ device_uid: sensorPayload.device_uid });
+
     const alertSocketData = {
       device_uid: sensorPayload.device_uid,
-      alert_id: newAlert._id,
+      alert_id: alertDoc._id,
       type: alertType,
       message: alertMessage,
-      feedback: sensorPayload.feedback
+      feedback: sensorPayload.feedback,
+      isOverwritten: isOverwritten
     };
-    if (dev && dev.adminId) {
-      global.io.to(`user_${dev.adminId}`).emit("new_alert", alertSocketData);
+
+    const targetDev = dev || await Device.findOne({ device_uid: sensorPayload.device_uid });
+    if (targetDev && targetDev.adminId) {
+      global.io.to(`user_${targetDev.adminId}`).emit("new_alert", alertSocketData);
     }
-    if (dev && dev.assignedStaff) {
-      global.io.to(`user_${dev.assignedStaff}`).emit("new_alert", alertSocketData);
+    if (targetDev && targetDev.assignedStaff) {
+      global.io.to(`user_${targetDev.assignedStaff}`).emit("new_alert", alertSocketData);
     }
 
     // Send notifications to Admin and Assigned Staff (FCM Push, DB, Socket, Email)
-    notificationService.handleMqttAlertNotification(sensorPayload, alertType, newAlert);
+    notificationService.handleMqttAlertNotification(sensorPayload, alertType, alertDoc);
   }
 }
 

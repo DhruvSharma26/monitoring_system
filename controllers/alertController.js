@@ -101,11 +101,11 @@ const getAlerts = async (req, res) => {
             const alertIdStr = alertItem._id ? alertItem._id.toString() : '';
             const devKey = (alertItem.device_uid || alertItem.deviceId || '').toLowerCase();
 
-            // Find matching task by alert ID or by device UID
+            // Find matching task strictly by alert ID first, or fallback to devKey only if alert status is ASSIGNED
             let task = taskByAlertIdMap.get(alertIdStr);
-            if (!task && devKey && tasksByDeviceUidMap.has(devKey)) {
+            if (!task && alertItem.status === "ASSIGNED" && devKey && tasksByDeviceUidMap.has(devKey)) {
                 const devTasks = tasksByDeviceUidMap.get(devKey);
-                task = devTasks.find(t => !processedTaskIds.has(t._id.toString())) || devTasks[0];
+                task = devTasks.find(t => !processedTaskIds.has(t._id.toString()));
             }
 
             if (task) {

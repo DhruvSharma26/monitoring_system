@@ -296,6 +296,37 @@ const postToiletTelemetry = async (req, res) => {
             { upsert: true, new: true }
         );
 
+        const Settings = require("../models/Settings");
+        const settings = await Settings.findOne() || { counterThreshold: 100, odorThreshold: 80 };
+
+        let alertType = null;
+        if (sensorPayload.feedback === 4) alertType = "CRITICAL_FEEDBACK";
+        else if (sensorPayload.feedback === 3) alertType = "WARNING_FEEDBACK";
+        else if (sensorPayload.OdorSensVal > settings.odorThreshold) alertType = "HIGH_ODOR";
+        else if (sensorPayload.Counter > settings.counterThreshold) alertType = "HIGH_USAGE";
+
+        if (alertType) {
+            const alertService = require("../services/alertService");
+            const { alert: alertDoc, isOverwritten } = await alertService.processOrCreateDeviceAlert({
+                device_uid: device.device_uid,
+                deviceId: device.deviceId,
+                alertType,
+                feedback: sensorPayload.feedback,
+                Counter: sensorPayload.Counter,
+                OdorSensVal: sensorPayload.OdorSensVal
+            });
+
+            if (global.io) {
+                global.io.emit("new_alert", {
+                    device_uid: device.device_uid,
+                    alert_id: alertDoc._id,
+                    type: alertType,
+                    feedback: sensorPayload.feedback,
+                    isOverwritten
+                });
+            }
+        }
+
         if (global.io) {
             global.io.emit("device_status_update", sensorPayload);
         }
