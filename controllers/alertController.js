@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Alert = require("../models/Alert");
 const Device = require("../models/Device");
 const SensorData = require("../models/SensorData");

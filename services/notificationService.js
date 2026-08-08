@@ -84,9 +84,10 @@ async function handleMqttAlertNotification(sensorPayload, alertType, alertDoc) {
             console.log(`🔔 DB Notification saved for ${user.role.toUpperCase()} (${user.name || user.email}) [ID: ${dbNotification._id}]`);
 
             // B. FCM Push Notification
-            const userTokens = [];
+            let userTokens = [];
             if (user.fcmToken) userTokens.push(user.fcmToken);
             if (Array.isArray(user.fcmTokens)) userTokens.push(...user.fcmTokens);
+            userTokens = Array.from(new Set(userTokens.filter(Boolean)));
 
             if (userTokens.length > 0) {
                 await sendPushNotification({
@@ -193,15 +194,22 @@ async function sendTaskSubmittedNotification(taskDoc, staffUser, deviceDoc) {
         const deviceUid = deviceDoc ? deviceDoc.device_uid : "N/A";
         const message = `Staff ${staffUser ? staffUser.name : 'Unknown'} has submitted the task for device ${deviceUid} (${deviceDoc?.location || ''}).`;
 
-        const recipients = [];
+        const recipientMap = new Map();
+
         if (taskDoc.assignedBy) {
             const admin = await User.findById(taskDoc.assignedBy);
-            if (admin) recipients.push(admin);
+            if (admin) recipientMap.set(admin._id.toString(), admin);
         }
-        if (recipients.length === 0 && deviceDoc && deviceDoc.adminId) {
+        if (deviceDoc && deviceDoc.adminId) {
             const admin = await User.findById(deviceDoc.adminId);
-            if (admin) recipients.push(admin);
+            if (admin) recipientMap.set(admin._id.toString(), admin);
         }
+        if (recipientMap.size === 0) {
+            const firstAdmin = await User.findOne({ role: "admin" });
+            if (firstAdmin) recipientMap.set(firstAdmin._id.toString(), firstAdmin);
+        }
+
+        const recipients = Array.from(recipientMap.values());
 
         for (const adminUser of recipients) {
             // Save DB Notification
@@ -215,10 +223,11 @@ async function sendTaskSubmittedNotification(taskDoc, staffUser, deviceDoc) {
                 type: "TASK_SUBMITTED"
             });
 
-            // Send FCM Push
-            const userTokens = [];
+            // Send FCM Push with strictly deduplicated tokens
+            let userTokens = [];
             if (adminUser.fcmToken) userTokens.push(adminUser.fcmToken);
             if (Array.isArray(adminUser.fcmTokens)) userTokens.push(...adminUser.fcmTokens);
+            userTokens = Array.from(new Set(userTokens.filter(Boolean)));
 
             if (userTokens.length > 0) {
                 await sendPushNotification({

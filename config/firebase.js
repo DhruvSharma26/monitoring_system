@@ -121,9 +121,11 @@ async function sendPushNotification({ tokens, title, body, data = {} }) {
         return { success: false, message: "Firebase credentials not provided" };
     }
 
-    const tokenList = Array.isArray(tokens) 
-        ? tokens.filter(t => typeof t === 'string' && t.trim().length > 0) 
+    const rawTokenList = Array.isArray(tokens) 
+        ? tokens.filter(t => typeof t === 'string' && t.trim().length > 0).map(t => t.trim())
         : (tokens && typeof tokens === 'string' && tokens.trim().length > 0 ? [tokens.trim()] : []);
+
+    const tokenList = Array.from(new Set(rawTokenList));
 
     if (tokenList.length === 0) {
         return { success: false, message: "No valid FCM tokens provided" };
