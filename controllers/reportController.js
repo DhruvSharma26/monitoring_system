@@ -34,11 +34,118 @@ const parseReportDateRange = (reqQuery) => {
     return { fromDate, tillDate };
 };
 
-// Helper to extract user display name and ID
-const getReportUserInfo = (userObj) => {
-    const generatedBy = userObj?.name || userObj?.contactPersonName || userObj?.email || "Admin";
-    const userId = userObj?.userId || userObj?.empId || userObj?.id || (userObj?._id ? userObj._id.toString() : "N/A");
+// Helper to extract user display name and Admin ID
+const getReportUserInfo = async (userObj) => {
+    let generatedBy = "Admin";
+    let userId = "N/A";
+    if (userObj && userObj.id) {
+        const dbUser = await User.findById(userObj.id).lean();
+        if (dbUser) {
+            generatedBy = dbUser.name || dbUser.contactPerson || dbUser.companyName || dbUser.email || "Admin";
+            if (dbUser.role === 'admin') {
+                userId = dbUser.userId || dbUser.empId || dbUser._id.toString();
+            } else if (dbUser.adminId) {
+                const adminUser = await User.findById(dbUser.adminId).lean();
+                userId = adminUser ? (adminUser.userId || adminUser.empId || adminUser._id.toString()) : (dbUser.userId || dbUser._id.toString());
+            } else {
+                userId = dbUser.userId || dbUser.empId || dbUser._id.toString();
+            }
+        } else {
+            userId = userObj.id;
+        }
+    }
     return { generatedBy, userId };
+};
+
+// Helper to compute 24h & 7d metrics from sensor logs
+const computePeriodMetrics = (sensorLogs, statusObj) => {
+    const now = new Date();
+    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    const logs24h = sensorLogs.filter(l => new Date(l.timestamp).getTime() >= twentyFourHoursAgo.getTime());
+    const logs7d = sensorLogs.filter(l => new Date(l.timestamp).getTime() >= sevenDaysAgo.getTime());
+
+    // 1. Last 24 Hours Metrics
+    let averageRating24h = 5.0;
+    if (logs24h.length > 0) {
+        const explicit = logs24h.filter(l => l.feedback !== undefined && l.feedback !== null && Number(l.feedback) > 0);
+        if (explicit.length > 0) {
+            const sum = explicit.reduce((acc, l) => acc + feedbackToRating(Number(l.feedback)), 0);
+            averageRating24h = parseFloat((sum / explicit.length).toFixed(1));
+        } else {
+            const highOdor = logs24h.some(l => (Number(l.OdorSensVal) || 0) >= 80);
+            const warningOdor = logs24h.some(l => (Number(l.OdorSensVal) || 0) >= 50);
+            averageRating24h = highOdor ? 1.0 : (warningOdor ? 2.5 : 5.0);
+        }
+    } else if (statusObj && statusObj.feedback !== undefined && statusObj.feedback !== null && Number(statusObj.feedback) > 0) {
+        averageRating24h = feedbackToRating(Number(statusObj.feedback));
+    } else if (statusObj && statusObj.OdorSensVal !== undefined) {
+        const odor = Number(statusObj.OdorSensVal) || 0;
+        averageRating24h = odor >= 80 ? 1.0 : (odor >= 50 ? 2.5 : 5.0);
+    }
+
+    let averageOdor24h = 0;
+    if (logs24h.length > 0) {
+        const sumOdor = logs24h.reduce((acc, l) => acc + (Number(l.OdorSensVal) || 0), 0);
+        averageOdor24h = Math.round(sumOdor / logs24h.length);
+    } else if (statusObj && statusObj.OdorSensVal !== undefined) {
+        averageOdor24h = Number(statusObj.OdorSensVal) || 0;
+    }
+
+    let totalUsage24h = 0;
+    if (logs24h.length > 0) {
+        for (const l of logs24h) {
+            const c = Number(l.Counter) || 0;
+            if (c > totalUsage24h) totalUsage24h = c;
+        }
+    } else if (statusObj && statusObj.Counter !== undefined) {
+        totalUsage24h = Number(statusObj.Counter) || 0;
+    }
+
+    // 2. Last 1 Week (7 Days) Metrics
+    const logs7dOrAll = logs7d.length > 0 ? logs7d : sensorLogs;
+    let averageRating7Days = 5.0;
+    if (logs7dOrAll.length > 0) {
+        const explicit = logs7dOrAll.filter(l => l.feedback !== undefined && l.feedback !== null && Number(l.feedback) > 0);
+        if (explicit.length > 0) {
+            const sum = explicit.reduce((acc, l) => acc + feedbackToRating(Number(l.feedback)), 0);
+            averageRating7Days = parseFloat((sum / explicit.length).toFixed(1));
+        } else {
+            const highOdor = logs7dOrAll.some(l => (Number(l.OdorSensVal) || 0) >= 80);
+            const warningOdor = logs7dOrAll.some(l => (Number(l.OdorSensVal) || 0) >= 50);
+            averageRating7Days = highOdor ? 1.0 : (warningOdor ? 2.5 : 5.0);
+        }
+    } else {
+        averageRating7Days = averageRating24h;
+    }
+
+    let averageOdor7Days = 0;
+    if (logs7dOrAll.length > 0) {
+        const sumOdor = logs7dOrAll.reduce((acc, l) => acc + (Number(l.OdorSensVal) || 0), 0);
+        averageOdor7Days = Math.round(sumOdor / logs7dOrAll.length);
+    } else {
+        averageOdor7Days = averageOdor24h;
+    }
+
+    let totalUsage7Days = 0;
+    if (logs7dOrAll.length > 0) {
+        for (const l of logs7dOrAll) {
+            const c = Number(l.Counter) || 0;
+            if (c > totalUsage7Days) totalUsage7Days = c;
+        }
+    } else {
+        totalUsage7Days = totalUsage24h;
+    }
+
+    return {
+        averageRating24h,
+        averageOdor24h,
+        totalUsage24h,
+        averageRating7Days,
+        averageOdor7Days,
+        totalUsage7Days
+    };
 };
 
 // Helper to get device scope for logged-in admin or staff
@@ -320,33 +427,28 @@ const getDeviceReports = async (req, res) => {
     try {
         const { deviceId } = req.query;
         const { fromDate, tillDate } = parseReportDateRange(req.query);
-        const { generatedBy, userId } = getReportUserInfo(req.user);
+        const { generatedBy, userId } = await getReportUserInfo(req.user);
 
         const { devices: userDevices } = await getAdminDeviceScope(req.user);
 
         let targetDevices = userDevices;
-        if (deviceId && deviceId !== "All") {
+        if (deviceId) {
             targetDevices = userDevices.filter(d => 
                 d.deviceId === deviceId || d.device_uid === deviceId || d._id.toString() === deviceId
             );
-            if (targetDevices.length === 0) {
-                // Fallback search
-                const isObjectId = mongoose.Types.ObjectId.isValid(deviceId);
-                const found = await Device.find({
-                    $or: isObjectId
-                        ? [{ deviceId }, { device_uid: deviceId }, { _id: deviceId }]
-                        : [{ deviceId }, { device_uid: deviceId }]
-                }).lean();
-                if (found.length > 0) targetDevices = found;
-            }
         }
 
         if (targetDevices.length === 0) {
-            targetDevices = await Device.find().limit(1).lean();
+            return res.status(200).json({ success: true, reports: [] });
         }
 
-        const targetDeviceUids = targetDevices.map(d => d.device_uid);
-        const statuses = await LatestDeviceStatus.find({ device_uid: { $in: targetDeviceUids } }).lean();
+        const allDeviceUids = targetDevices.flatMap(d => [d.device_uid, d.deviceId, d._id ? d._id.toString() : null].filter(Boolean));
+        const regexAllUids = allDeviceUids.map(u => new RegExp(`^${u.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'));
+
+        const statuses = await LatestDeviceStatus.find({
+            $or: [{ device_uid: { $in: regexAllUids } }, { deviceId: { $in: regexAllUids } }]
+        }).lean();
+
         const statusMap = {};
         statuses.forEach(item => {
             if (item.device_uid) statusMap[item.device_uid.toLowerCase()] = item;
@@ -441,26 +543,7 @@ const getDeviceReports = async (req, res) => {
             const currentOdor = statusObj?.OdorSensVal || 0;
             const currentCounter = statusObj?.Counter || 0;
 
-            let averageRating = 0;
-            if (sensorLogs.length > 0) {
-                const sumRating = sensorLogs.reduce((acc, l) => acc + feedbackToRating(l.feedback), 0);
-                averageRating = parseFloat((sumRating / sensorLogs.length).toFixed(1));
-            }
-
-            let averageOdor = 0;
-            if (sensorLogs.length > 0) {
-                const sumOdor = sensorLogs.reduce((acc, l) => acc + (l.OdorSensVal || 0), 0);
-                averageOdor = Math.round(sumOdor / sensorLogs.length);
-            }
-
-            let totalUsage = 0;
-            if (sensorLogs.length > 0) {
-                for (const l of sensorLogs) {
-                    const c = Number(l.Counter) || 0;
-                    if (c > totalUsage) totalUsage = c;
-                }
-            }
-
+            const metrics = computePeriodMetrics(sensorLogs, statusObj);
             const feedbackHistory = calculateDailyBreakdown(sensorLogs, fromDate, tillDate, statusObj);
 
             return {
@@ -472,9 +555,15 @@ const getDeviceReports = async (req, res) => {
                 periodTill: tillDate.toISOString().split("T")[0],
                 generatedBy,
                 userId,
-                averageRating,
-                averageOdor,
-                totalUsage,
+                averageRating: metrics.averageRating24h,
+                averageOdor: metrics.averageOdor24h,
+                totalUsage: metrics.totalUsage24h,
+                averageRating24h: metrics.averageRating24h,
+                averageOdor24h: metrics.averageOdor24h,
+                totalUsage24h: metrics.totalUsage24h,
+                averageRating7Days: metrics.averageRating7Days,
+                averageOdor7Days: metrics.averageOdor7Days,
+                totalUsage7Days: metrics.totalUsage7Days,
                 currentRating,
                 currentOdor,
                 currentCounter,
@@ -503,7 +592,7 @@ const downloadReportPdf = async (req, res) => {
     try {
         const { deviceId, incRating, incOdor, incCounter, incStatus, incStaff, incHistory } = req.query;
         const { fromDate, tillDate } = parseReportDateRange(req.query);
-        const { generatedBy, userId } = getReportUserInfo(req.user);
+        const { generatedBy, userId } = await getReportUserInfo(req.user);
 
         const { devices: userDevices } = await getAdminDeviceScope(req.user);
 
@@ -549,30 +638,7 @@ const downloadReportPdf = async (req, res) => {
         if (currentFeedback === 3) status = "Needs Attention";
         if (currentFeedback === 4) status = "Critical / Alert";
 
-        const currentRating = feedbackToRating(currentFeedback);
-        const currentOdor = statusObj?.OdorSensVal || 0;
-        const currentCounter = statusObj?.Counter || 0;
-
-        let averageRating = 0;
-        if (sensorLogs.length > 0) {
-            const sumRating = sensorLogs.reduce((acc, l) => acc + feedbackToRating(l.feedback), 0);
-            averageRating = parseFloat((sumRating / sensorLogs.length).toFixed(1));
-        }
-
-        let averageOdor = 0;
-        if (sensorLogs.length > 0) {
-            const sumOdor = sensorLogs.reduce((acc, l) => acc + (l.OdorSensVal || 0), 0);
-            averageOdor = Math.round(sumOdor / sensorLogs.length);
-        }
-
-        let totalUsage = 0;
-        if (sensorLogs.length > 0) {
-            for (const l of sensorLogs) {
-                const c = Number(l.Counter) || 0;
-                if (c > totalUsage) totalUsage = c;
-            }
-        }
-
+        const metrics = computePeriodMetrics(sensorLogs, statusObj);
         const periodFromStr = fromDate.toISOString().split("T")[0];
         const periodTillStr = tillDate.toISOString().split("T")[0];
 
@@ -592,20 +658,27 @@ const downloadReportPdf = async (req, res) => {
 
         doc.fillColor("#333333").fontSize(11).text(`Report Period: ${periodFromStr} till ${periodTillStr}`);
         doc.text(`Generated By: ${generatedBy}`);
-        doc.text(`User ID: ${userId}`);
+        doc.text(`User ID (Admin ID): ${userId}`);
         doc.text(`Device ID: ${device.deviceId || device.device_uid}`);
         doc.fontSize(11).text(`Location: ${device.location || 'Main Restroom'} (Floor: ${device.floor || 'G'})`);
         doc.text(`Generated Date: ${new Date().toLocaleString()}`);
         doc.moveDown();
 
-        doc.fillColor("#0066FF").fontSize(14).text("PERIOD METRICS & TELEMETRY SUMMARY");
+        doc.fillColor("#0066FF").fontSize(14).text("LAST 24 HOURS METRICS SUMMARY");
         doc.moveDown(0.5);
 
         if (incStatus !== "false") doc.fillColor("#333333").fontSize(11).text(`• Current Device Status: ${status}`);
-        if (incRating !== "false") doc.fillColor("#333333").fontSize(11).text(`• Average Star Rating (Period): ${averageRating} / 5.0`);
-        if (incOdor !== "false") doc.fillColor("#333333").fontSize(11).text(`• Average Odor Level (Period): ${averageOdor} PPM`);
-        if (incCounter !== "false") doc.fillColor("#333333").fontSize(11).text(`• Total Usage Counter (Entire Period): ${totalUsage} Entries`);
+        if (incRating !== "false") doc.fillColor("#333333").fontSize(11).text(`• Average Star Rating (Last 24 Hours): ${metrics.averageRating24h} / 5.0`);
+        if (incOdor !== "false") doc.fillColor("#333333").fontSize(11).text(`• Average Odor Level (Last 24 Hours): ${metrics.averageOdor24h} PPM`);
+        if (incCounter !== "false") doc.fillColor("#333333").fontSize(11).text(`• Total Visitor Usage Counter (Last 24 Hours): ${metrics.totalUsage24h} Entries`);
         if (incStaff !== "false") doc.fillColor("#333333").fontSize(11).text(`• Staff Cleaning Log: Last Cleaned ${lastCleaned} by ${staffName} (${staffId})`);
+
+        doc.moveDown();
+        doc.fillColor("#0066FF").fontSize(14).text("LAST 1 WEEK (7 DAYS) PERFORMANCE SUMMARY");
+        doc.moveDown(0.5);
+        if (incRating !== "false") doc.fillColor("#333333").fontSize(11).text(`• Average Star Rating (Last 1 Week): ${metrics.averageRating7Days} / 5.0`);
+        if (incOdor !== "false") doc.fillColor("#333333").fontSize(11).text(`• Average Odor Level (Last 1 Week): ${metrics.averageOdor7Days} PPM`);
+        if (incCounter !== "false") doc.fillColor("#333333").fontSize(11).text(`• Total Visitor Usage Counter (Last 1 Week): ${metrics.totalUsage7Days} Entries`);
 
         if (incStaff !== "false") {
             doc.moveDown();
@@ -671,7 +744,7 @@ const downloadReportCsv = async (req, res) => {
     try {
         const { deviceId, incRating, incOdor, incCounter, incStatus, incStaff, incHistory } = req.query;
         const { fromDate, tillDate } = parseReportDateRange(req.query);
-        const { generatedBy, userId } = getReportUserInfo(req.user);
+        const { generatedBy, userId } = await getReportUserInfo(req.user);
 
         const { devices: userDevices } = await getAdminDeviceScope(req.user);
 
@@ -717,30 +790,7 @@ const downloadReportCsv = async (req, res) => {
         if (currentFeedback === 3) status = "Needs Attention";
         if (currentFeedback === 4) status = "Critical / Alert";
 
-        const currentRating = feedbackToRating(currentFeedback);
-        const currentOdor = statusObj?.OdorSensVal || 0;
-        const currentCounter = statusObj?.Counter || 0;
-
-        let averageRating = 0;
-        if (sensorLogs.length > 0) {
-            const sumRating = sensorLogs.reduce((acc, l) => acc + feedbackToRating(l.feedback), 0);
-            averageRating = parseFloat((sumRating / sensorLogs.length).toFixed(1));
-        }
-
-        let averageOdor = 0;
-        if (sensorLogs.length > 0) {
-            const sumOdor = sensorLogs.reduce((acc, l) => acc + (l.OdorSensVal || 0), 0);
-            averageOdor = Math.round(sumOdor / sensorLogs.length);
-        }
-
-        let totalUsage = 0;
-        if (sensorLogs.length > 0) {
-            for (const l of sensorLogs) {
-                const c = Number(l.Counter) || 0;
-                if (c > totalUsage) totalUsage = c;
-            }
-        }
-
+        const metrics = computePeriodMetrics(sensorLogs, statusObj);
         const periodFromStr = fromDate.toISOString().split("T")[0];
         const periodTillStr = tillDate.toISOString().split("T")[0];
 
@@ -752,13 +802,20 @@ const downloadReportCsv = async (req, res) => {
         buffer.push(`Report Period From,${periodFromStr}`);
         buffer.push(`Report Period Till,${periodTillStr}`);
         buffer.push(`Generated By,"${generatedBy}"`);
-        buffer.push(`User ID,${userId}`);
+        buffer.push(`User ID (Admin ID),${userId}`);
         buffer.push(`Device ID,${device.deviceId || device.device_uid}`);
         buffer.push(`Location,"${device.location || 'Main Restroom'}"`);
         if (incStatus !== "false") buffer.push(`Status,${status}`);
-        if (incRating !== "false") buffer.push(`Average Rating (Period),${averageRating} / 5.0`);
-        if (incOdor !== "false") buffer.push(`Average Odor Level (Period),${averageOdor} PPM`);
-        if (incCounter !== "false") buffer.push(`Total Usage Counter (Period),${totalUsage}`);
+        buffer.push("");
+        buffer.push("--- LAST 24 HOURS METRICS ---");
+        if (incRating !== "false") buffer.push(`Average Rating (Last 24 Hours),${metrics.averageRating24h} / 5.0`);
+        if (incOdor !== "false") buffer.push(`Average Odor Level (Last 24 Hours),${metrics.averageOdor24h} PPM`);
+        if (incCounter !== "false") buffer.push(`Total Usage Counter (Last 24 Hours),${metrics.totalUsage24h}`);
+        buffer.push("");
+        buffer.push("--- LAST 1 WEEK (7 DAYS) METRICS ---");
+        if (incRating !== "false") buffer.push(`Average Rating (Last 1 Week),${metrics.averageRating7Days} / 5.0`);
+        if (incOdor !== "false") buffer.push(`Average Odor Level (Last 1 Week),${metrics.averageOdor7Days} PPM`);
+        if (incCounter !== "false") buffer.push(`Total Usage Counter (Last 1 Week),${metrics.totalUsage7Days}`);
         if (incStaff !== "false") buffer.push(`Last Cleaned,"${lastCleaned}"`);
         if (incStaff !== "false") buffer.push(`Cleaned By Staff,"${staffName} (${staffId})"`);
 
