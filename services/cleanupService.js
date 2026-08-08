@@ -14,6 +14,7 @@ async function cleanupOldResolvedItems() {
         const oldResolvedTasks = await Task.find({
             status: { $in: ["VERIFIED", "COMPLETED", "RESOLVED"] },
             $or: [
+                { resolvedAt: { $lt: fifteenDaysAgo } },
                 { verifiedAt: { $lt: fifteenDaysAgo } },
                 { completedAt: { $lt: fifteenDaysAgo } },
                 { submittedAt: { $lt: fifteenDaysAgo } },
@@ -28,10 +29,10 @@ async function cleanupOldResolvedItems() {
         const oldResolvedAlerts = await Alert.find({
             status: "RESOLVED",
             $or: [
+                { resolvedAt: { $lt: fifteenDaysAgo } },
                 { verifiedAt: { $lt: fifteenDaysAgo } },
                 { completedAt: { $lt: fifteenDaysAgo } },
-                { updatedAt: { $lt: fifteenDaysAgo } },
-                { createdAt: { $lt: fifteenDaysAgo } }
+                { updatedAt: { $lt: fifteenDaysAgo } }
             ]
         }).select("_id");
 

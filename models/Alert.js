@@ -37,7 +37,9 @@ const alertSchema = new mongoose.Schema(
             "RESOLVED"
         ],
         default: "OPEN"
-    }
+    },
+
+    resolvedAt: Date
 },
 {
     timestamps: true

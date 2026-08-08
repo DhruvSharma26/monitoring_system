@@ -128,6 +128,7 @@ const getAlerts = async (req, res) => {
                 }
                 alertItem.taskCleaningPhotos = photos.filter(Boolean);
 
+                alertItem.resolvedAt = task.resolvedAt || task.verifiedAt || alertItem.resolvedAt;
                 alertItem.assignedAt = task.assignedAt;
                 alertItem.startedAt = task.startedAt;
                 alertItem.photosUploadedAt = task.photosUploadedAt;
@@ -142,9 +143,9 @@ const getAlerts = async (req, res) => {
                 alertItem.taskCleaningPhotos = [];
             }
 
-            // Exclude resolved alerts older than 15 days
+            // Exclude resolved alerts older than 15 days based strictly on resolvedAt timestamp
             if (alertItem.status === "RESOLVED") {
-                const resolvedDate = alertItem.verifiedAt || alertItem.completedAt || alertItem.updatedAt || alertItem.createdAt;
+                const resolvedDate = alertItem.resolvedAt || alertItem.verifiedAt || alertItem.completedAt || alertItem.updatedAt;
                 if (resolvedDate && new Date(resolvedDate) < fifteenDaysAgo) {
                     continue;
                 }
@@ -200,14 +201,15 @@ const getAlerts = async (req, res) => {
                 submittedAt: task.submittedAt,
                 completedAt: task.completedAt,
                 verifiedAt: task.verifiedAt,
+                resolvedAt: task.resolvedAt || task.verifiedAt || task.completedAt,
                 createdAt: task.createdAt || new Date(),
                 assignedStaffName: task.staff ? task.staff.name : '',
                 assignedStaffEmpId: task.staff ? (task.staff.empId || task.staff.userId || '') : ''
             };
 
-            // Exclude resolved tasks older than 15 days
+            // Exclude resolved tasks older than 15 days based strictly on resolvedAt timestamp
             if (syntheticAlert.status === "RESOLVED") {
-                const resolvedDate = syntheticAlert.verifiedAt || syntheticAlert.completedAt || syntheticAlert.createdAt;
+                const resolvedDate = syntheticAlert.resolvedAt || syntheticAlert.verifiedAt || syntheticAlert.completedAt;
                 if (resolvedDate && new Date(resolvedDate) < fifteenDaysAgo) {
                     continue;
                 }
@@ -314,7 +316,9 @@ const resolveAlert = async (req, res) => {
 
         }
 
+        const now = new Date();
         alert.status = "RESOLVED";
+        alert.resolvedAt = alert.resolvedAt || now;
         await alert.save();
 
         // Also update associated task if it exists
@@ -322,8 +326,9 @@ const resolveAlert = async (req, res) => {
         if (task) {
             task.status = "VERIFIED";
             task.progressPercent = 100;
-            task.verifiedAt = task.verifiedAt || new Date();
-            task.completedAt = task.completedAt || new Date();
+            task.verifiedAt = task.verifiedAt || now;
+            task.completedAt = task.completedAt || now;
+            task.resolvedAt = task.resolvedAt || now;
             await task.save();
             if (global.io) {
                 global.io.emit("task_status_updated", { taskId: task._id, status: "VERIFIED", progressPercent: 100 });

@@ -58,6 +58,7 @@ const taskSchema = new mongoose.Schema(
     }],
     adminRemarks: String,
     verifiedAt: Date,
+    resolvedAt: Date,
 
     timeline: [{
         status: String,
