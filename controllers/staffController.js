@@ -59,14 +59,6 @@ const registerStaff = async (req, res) => {
         }
 
         const staffCount = await User.countDocuments({ role: "staff" });
-            
-        if (staffCount >= 2) {
-            return res.status(400).json({
-                success: false,
-                message: "Maximum of 2 staffs allowed"
-            });
-        }
-
         const staffId = "STF" + String(staffCount + 1).padStart(3, "0");
 
         const isObjectId = mongoose.Types.ObjectId.isValid(deviceId);
