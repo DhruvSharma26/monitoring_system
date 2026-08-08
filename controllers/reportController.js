@@ -721,14 +721,44 @@ const downloadReportPdf = async (req, res) => {
         if (incOdor !== "false") doc.fillColor("#333333").fontSize(11).text(`• Average Odor Level (Last 1 Week): ${metrics.averageOdor7Days} PPM`);
         if (incCounter !== "false") doc.fillColor("#333333").fontSize(11).text(`• Total Visitor Usage Counter (Last 1 Week): ${metrics.totalUsage7Days} Entries`);
 
-        doc.moveDown(0.5);
-        doc.fillColor("#333333").fontSize(11).text("• Last 1 Week Daywise Breakdown:");
+        doc.moveDown(0.8);
+        doc.fillColor("#0066FF").fontSize(12).text("LAST 1 WEEK DAYWISE BREAKDOWN TABLE", { underline: true });
+        doc.moveDown(0.4);
+
         const historyListPdf = calculateDailyBreakdown(sensorLogs, fromDate, tillDate, statusObj);
-        for (const item of historyListPdf) {
-            doc.fillColor("#555555").fontSize(10).text(
-                `   - ${item.dayFull || item.day} (${item.date}): Avg Rating: ${item.rating} / 5.0 | Avg Odor: ${item.odor} PPM | Visitor Counter: ${item.counter}`
-            );
-        }
+        
+        const tableStartX = 40;
+        let tableY = doc.y;
+        
+        // Draw Header Box
+        doc.rect(tableStartX, tableY, 510, 20).fill("#0066FF");
+        doc.fillColor("#FFFFFF").fontSize(9).font("Helvetica-Bold");
+        doc.text("Day", tableStartX + 8, tableY + 5, { width: 80 });
+        doc.text("Date", tableStartX + 90, tableY + 5, { width: 75 });
+        doc.text("Avg Rating", tableStartX + 170, tableY + 5, { width: 75 });
+        doc.text("Avg Odor", tableStartX + 250, tableY + 5, { width: 75 });
+        doc.text("Visitor Usages", tableStartX + 330, tableY + 5, { width: 90 });
+        doc.text("Feedbacks", tableStartX + 430, tableY + 5, { width: 70 });
+        
+        tableY += 20;
+        doc.font("Helvetica");
+
+        historyListPdf.forEach((item, idx) => {
+            const rowBg = idx % 2 === 0 ? "#F8F9FA" : "#FFFFFF";
+            doc.rect(tableStartX, tableY, 510, 18).fill(rowBg);
+            doc.fillColor("#333333").fontSize(9);
+            doc.text(`${item.dayFull || item.day}`, tableStartX + 8, tableY + 4, { width: 80 });
+            doc.text(`${item.date}`, tableStartX + 90, tableY + 4, { width: 75 });
+            doc.text(`${item.rating} / 5.0`, tableStartX + 170, tableY + 4, { width: 75 });
+            doc.text(`${item.odor} PPM`, tableStartX + 250, tableY + 4, { width: 75 });
+            doc.text(`${item.counter}`, tableStartX + 330, tableY + 4, { width: 90 });
+            doc.text(`${item.totalFeedback}`, tableStartX + 430, tableY + 4, { width: 70 });
+            tableY += 18;
+        });
+
+        // Grid border
+        doc.strokeColor("#CCCCCC").lineWidth(0.5).rect(tableStartX, doc.y - 20, 510, historyListPdf.length * 18 + 20).stroke();
+        doc.y = tableY + 10;
 
         if (incStaff !== "false") {
             doc.moveDown();
@@ -759,7 +789,7 @@ const downloadReportPdf = async (req, res) => {
                         `• Staff: ${sName} | System ID: ${sUserId} | Emp ID: ${sEmpId}`
                     );
                     doc.fillColor("#666666").fontSize(9).text(
-                        `  Task: ${t.title || 'Restroom Cleaning'} | Assigned: ${aTime} | Completed: ${cTime}`
+                        `  Assigned: ${aTime} | Completed: ${cTime}`
                     );
                     doc.moveDown(0.2);
                 }
