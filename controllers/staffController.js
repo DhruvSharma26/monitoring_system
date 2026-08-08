@@ -169,6 +169,7 @@ const deleteStaff = async (req, res) => {
         if (staff.assignedDevice) {
             await Device.findByIdAndUpdate(staff.assignedDevice, { assignedStaff: null });
         }
+        await Device.updateMany({ assignedStaff: staff._id }, { assignedStaff: null });
 
         await User.findByIdAndDelete(req.params.id);
         res.status(200).json({ success: true, message: "Staff deleted" });
