@@ -76,6 +76,56 @@ const getAlerts = async (req, res) => {
             alerts = await Alert.find(fallbackQuery).sort({ createdAt: -1 }).lean();
         }
 
+        // Additional Fail-Safe: Synthesize alerts from LatestDeviceStatus and Tasks if Alert collection has no items
+        if (alerts.length === 0) {
+            const statuses = await LatestDeviceStatus.find({
+                $or: [
+                    { OdorSensVal: { $gt: 50 } },
+                    { Counter: { $gt: 200 } },
+                    { feedback: { $gte: 3 } }
+                ]
+            }).lean();
+
+            for (const s of statuses) {
+                const devUid = s.device_uid || s.deviceId || '';
+                if (!devUid) continue;
+                let alertType = 'HIGH_ODOR';
+                if (s.feedback === 4) alertType = 'CRITICAL_FEEDBACK';
+                else if (s.feedback === 3) alertType = 'WARNING_FEEDBACK';
+                else if (s.Counter > 200) alertType = 'HIGH_USAGE';
+
+                alerts.push({
+                    _id: s._id,
+                    device_uid: devUid,
+                    deviceId: devUid,
+                    alertType: alertType,
+                    feedback: s.feedback || 0,
+                    Counter: s.Counter || 0,
+                    OdorSensVal: s.OdorSensVal || 0,
+                    status: 'OPEN',
+                    createdAt: s.updatedAt || new Date()
+                });
+            }
+
+            const tasks = await Task.find().populate("staff", "name empId userId").sort({ createdAt: -1 }).lean();
+            for (const t of tasks) {
+                const devUid = t.device_uid || t.deviceId || '';
+                if (!devUid) continue;
+                const existing = alerts.find(a => (a.device_uid || '').toLowerCase() === devUid.toLowerCase());
+                if (!existing) {
+                    alerts.push({
+                        _id: t._id,
+                        device_uid: devUid,
+                        deviceId: devUid,
+                        alertType: t.title || 'TASK_ASSIGNED',
+                        feedback: 3,
+                        status: (t.status === 'VERIFIED' || t.status === 'COMPLETED' || t.status === 'RESOLVED') ? 'RESOLVED' : 'OPEN',
+                        createdAt: t.createdAt || new Date()
+                    });
+                }
+            }
+        }
+
         const seenActiveDevices = new Set();
         const latestAlerts = [];
 
