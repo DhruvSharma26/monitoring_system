@@ -7,7 +7,8 @@ require("../middleware/authMiddleware");
 
 const {
     getToiletDetails,
-    markToiletClean
+    markToiletClean,
+    postToiletTelemetry
 } = require(
     "../controllers/toiletController"
 );
@@ -22,6 +23,12 @@ router.post(
     "/:deviceId/mark-clean",
     authMiddleware,
     markToiletClean
+);
+
+router.post(
+    "/:deviceId/telemetry",
+    authMiddleware,
+    postToiletTelemetry
 );
 
 module.exports = router;

@@ -26,15 +26,20 @@ const getToiletDetails = async (req, res) => {
         sevenDaysAgo.setDate(now.getDate() - 6);
         sevenDaysAgo.setHours(0, 0, 0, 0);
 
-        const targetUids = [device.device_uid, device.deviceId].filter(Boolean);
+        const targetUids = [device.device_uid, device.deviceId, device._id ? device._id.toString() : null].filter(Boolean);
+        const regexUids = targetUids.map(u => new RegExp(`^${u.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'));
 
         const [latestStatus, alerts, tasks, staff, last7DaysSensorLogs, lastCompletedTask, completedTasks7Days] = await Promise.all([
-            LatestDeviceStatus.findOne({ device_uid: { $in: targetUids } }).lean(),
-            Alert.find({ device_uid: { $in: targetUids } }).sort({ createdAt: -1 }).limit(10).lean(),
+            LatestDeviceStatus.findOne({
+                $or: [{ device_uid: { $in: regexUids } }, { deviceId: { $in: regexUids } }]
+            }).lean(),
+            Alert.find({
+                $or: [{ device_uid: { $in: regexUids } }, { deviceId: { $in: regexUids } }]
+            }).sort({ createdAt: -1 }).limit(10).lean(),
             Task.find({ device: device._id }).populate("staff").sort({ createdAt: -1 }),
             User.findOne({ assignedDevice: device._id }).lean(),
             SensorData.find({
-                device_uid: { $in: targetUids },
+                $or: [{ device_uid: { $in: regexUids } }, { deviceId: { $in: regexUids } }],
                 timestamp: { $gte: sevenDaysAgo }
             }).sort({ timestamp: 1 }).lean(),
             Task.findOne({ device: device._id, status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] } }).populate("staff", "name empId userId").sort({ updatedAt: -1 }).lean(),
@@ -147,6 +152,15 @@ const getToiletDetails = async (req, res) => {
                     const warningOdor = dayLogs.some(l => (Number(l.OdorSensVal) || 0) >= 50);
                     dayRating = highOdor ? 1.0 : (warningOdor ? 2.5 : 5.0);
                 }
+            } else if (i === 0 && latestStatus) {
+                // Fallback for today if live telemetry exists
+                dayCounter = Number(latestStatus.Counter) || 0;
+                dayOdor = Number(latestStatus.OdorSensVal) || 0;
+                if (latestStatus.feedback !== undefined && latestStatus.feedback > 0) {
+                    dayRating = feedbackToRating(latestStatus.feedback);
+                } else {
+                    dayRating = dayOdor >= 80 ? 1.0 : (dayOdor >= 50 ? 2.5 : 5.0);
+                }
             } else {
                 dayCounter = 0;
                 dayOdor = 0;
@@ -172,10 +186,16 @@ const getToiletDetails = async (req, res) => {
             averageRating = feedbackToRating(latestStatus.feedback);
         }
 
-        let totalUsage = latestStatus?.Counter || 0;
+        let totalUsage = Number(latestStatus?.Counter) || 0;
+        let currentCounter = Number(latestStatus?.Counter) || 0;
+        let currentOdor = Number(latestStatus?.OdorSensVal) || 0;
+
         for (const l of last7DaysSensorLogs) {
             const c = Number(l.Counter) || 0;
             if (c > totalUsage) totalUsage = c;
+            if (c > currentCounter) currentCounter = c;
+            const o = Number(l.OdorSensVal) || 0;
+            if (o > currentOdor) currentOdor = o;
         }
 
         res.status(200).json({
@@ -185,12 +205,12 @@ const getToiletDetails = async (req, res) => {
             averageRating,
             totalUsage,
             latestSensor: latestStatus || {
-                Counter: latestStatus?.Counter || 0,
-                OdorSensVal: latestStatus?.OdorSensVal || 0,
+                Counter: currentCounter,
+                OdorSensVal: currentOdor,
                 feedback: latestStatus?.feedback || 1
             },
-            currentCounter: latestStatus?.Counter || 0,
-            currentOdor: latestStatus?.OdorSensVal || 0,
+            currentCounter: currentCounter,
+            currentOdor: currentOdor,
             lastCleanedByStaff,
             lastCleanedByStaffName,
             lastCleanedByStaffUserId,
@@ -215,17 +235,23 @@ const getToiletDetails = async (req, res) => {
 const markToiletClean = async (req, res) => {
     try {
         const { deviceId } = req.params;
-        const device = await Device.findOne({ deviceId });
+        const isObjectId = mongoose.Types.ObjectId.isValid(deviceId);
+        const device = await Device.findOne({
+            $or: isObjectId
+                ? [{ _id: deviceId }, { deviceId }, { device_uid: deviceId }]
+                : [{ deviceId }, { device_uid: deviceId }]
+        });
         if (!device) return res.status(404).json({ success: false, message: "Device not found" });
 
         await LatestDeviceStatus.findOneAndUpdate(
-            { device_uid: device.device_uid },
+            { $or: [{ device_uid: device.device_uid }, { deviceId: device.deviceId }] },
             { $set: { feedback: 0, Counter: 0, OdorSensVal: 0, timestamp: new Date() } },
             { upsert: true, new: true }
         );
 
         await SensorData.create({
             device_uid: device.device_uid,
+            deviceId: device.deviceId,
             feedback: 0,
             Counter: 0,
             OdorSensVal: 0,
@@ -239,9 +265,50 @@ const markToiletClean = async (req, res) => {
     }
 };
 
+const postToiletTelemetry = async (req, res) => {
+    try {
+        const { deviceId } = req.params;
+        const { Counter, OdorSensVal, feedback } = req.body;
+
+        const isObjectId = mongoose.Types.ObjectId.isValid(deviceId);
+        const device = await Device.findOne({
+            $or: isObjectId
+                ? [{ _id: deviceId }, { deviceId }, { device_uid: deviceId }]
+                : [{ deviceId }, { device_uid: deviceId }]
+        });
+
+        if (!device) return res.status(404).json({ success: false, message: "Device not found" });
+
+        const sensorPayload = {
+            device_uid: device.device_uid,
+            deviceId: device.deviceId,
+            timestamp: new Date(),
+            Counter: Counter !== undefined ? Number(Counter) : 0,
+            OdorSensVal: OdorSensVal !== undefined ? Number(OdorSensVal) : 0,
+            feedback: feedback !== undefined ? Number(feedback) : 1
+        };
+
+        await SensorData.create(sensorPayload);
+
+        await LatestDeviceStatus.findOneAndUpdate(
+            { $or: [{ device_uid: device.device_uid }, { deviceId: device.deviceId }] },
+            { $set: sensorPayload },
+            { upsert: true, new: true }
+        );
+
+        if (global.io) {
+            global.io.emit("device_status_update", sensorPayload);
+        }
+
+        res.status(200).json({ success: true, message: "Telemetry recorded successfully", data: sensorPayload });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+};
+
 module.exports = {
-
     getToiletDetails,
-    markToiletClean
-
+    markToiletClean,
+    postToiletTelemetry
 };

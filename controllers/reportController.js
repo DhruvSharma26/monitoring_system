@@ -349,14 +349,23 @@ const getDeviceReports = async (req, res) => {
         const statuses = await LatestDeviceStatus.find({ device_uid: { $in: targetDeviceUids } }).lean();
         const statusMap = {};
         statuses.forEach(item => {
-            statusMap[item.device_uid] = item;
+            if (item.device_uid) statusMap[item.device_uid.toLowerCase()] = item;
+            if (item.deviceId) statusMap[item.deviceId.toLowerCase()] = item;
         });
 
         const reports = await Promise.all(targetDevices.map(async (device) => {
-            const statusObj = statusMap[device.device_uid];
+            const devUids = [device.device_uid, device.deviceId, device._id ? device._id.toString() : null].filter(Boolean);
+            const uidsRegex = devUids.map(u => new RegExp(`^${u.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'));
+            let statusObj = null;
+            for (const u of devUids) {
+                if (statusMap[u.toLowerCase()]) {
+                    statusObj = statusMap[u.toLowerCase()];
+                    break;
+                }
+            }
 
             const sensorLogs = await SensorData.find({
-                device_uid: device.device_uid,
+                $or: [{ device_uid: { $in: uidsRegex } }, { deviceId: { $in: uidsRegex } }],
                 timestamp: { $gte: fromDate, $lte: tillDate }
             }).sort({ timestamp: 1 }).lean();
 

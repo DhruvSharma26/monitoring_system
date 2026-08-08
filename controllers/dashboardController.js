@@ -67,9 +67,14 @@ const getDashboard = async (req, res) => {
         sevenDaysAgo.setDate(now.getDate() - 6);
         sevenDaysAgo.setHours(0, 0, 0, 0);
 
-        const allUids = devices.flatMap(d => [d.device_uid, d.deviceId].filter(Boolean));
+        const allUids = devices.flatMap(d => [d.device_uid, d.deviceId, d._id ? d._id.toString() : null].filter(Boolean));
+        const uidsRegex = allUids.map(u => new RegExp(`^${u.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'));
+
         const sensorLogs = await SensorData.find({
-            device_uid: { $in: allUids },
+            $or: [
+                { device_uid: { $in: uidsRegex } },
+                { deviceId: { $in: uidsRegex } }
+            ],
             timestamp: { $gte: sevenDaysAgo }
         }).lean();
 
@@ -101,21 +106,32 @@ const getDashboard = async (req, res) => {
 
             // Daily usage count across all toilets
             let dayUsageTotal = 0;
-            if (dayLogs.length > 0) {
-                // Group by device and get max counter per device on that day
-                const deviceMap = {};
-                for (const log of dayLogs) {
-                    const du = log.device_uid;
+            const deviceMap = {};
+
+            for (const device of devices) {
+                const devUids = [device.device_uid, device.deviceId, device._id ? device._id.toString() : null].filter(Boolean);
+                const devLogs = dayLogs.filter(l => devUids.some(u => 
+                    (l.device_uid && l.device_uid.toLowerCase() === u.toLowerCase()) || 
+                    (l.deviceId && l.deviceId.toLowerCase() === u.toLowerCase())
+                ));
+                let maxCounter = 0;
+                for (const log of devLogs) {
                     const c = Number(log.Counter) || 0;
-                    if (!deviceMap[du] || c > deviceMap[du]) {
-                        deviceMap[du] = c;
+                    if (c > maxCounter) maxCounter = c;
+                }
+                if (maxCounter === 0 && i === 0) {
+                    const st = statusMap[device.device_uid] || statusMap[device.deviceId];
+                    if (st && st.Counter) {
+                        maxCounter = Number(st.Counter) || 0;
                     }
                 }
-                dayUsageTotal = Object.values(deviceMap).reduce((a, b) => a + b, 0);
+                deviceMap[device.device_uid || device._id] = maxCounter;
             }
 
+            dayUsageTotal = Object.values(deviceMap).reduce((a, b) => a + b, 0);
+
             // Daily average rating across all toilets
-            let dayRatingAvg = 0.0;
+            let dayRatingAvg = 5.0;
             if (dayLogs.length > 0) {
                 const explicitFeedbackLogs = dayLogs.filter(l => l.feedback !== undefined && l.feedback !== null && Number(l.feedback) > 0);
                 if (explicitFeedbackLogs.length > 0) {

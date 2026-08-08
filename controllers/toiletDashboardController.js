@@ -28,13 +28,21 @@ const getToilets = async (req, res) => {
 
         const statusMap = {};
         statuses.forEach(item => {
-            statusMap[item.device_uid] = item;
+            if (item.device_uid) statusMap[item.device_uid.toLowerCase()] = item;
+            if (item.deviceId) statusMap[item.deviceId.toLowerCase()] = item;
         });
 
         const toilets = [];
 
         for (const device of devices) {
-            const latestStatus = statusMap[device.device_uid] || {};
+            const devUids = [device.device_uid, device.deviceId, device._id ? device._id.toString() : null].filter(Boolean);
+            let latestStatus = {};
+            for (const u of devUids) {
+                if (statusMap[u.toLowerCase()]) {
+                    latestStatus = statusMap[u.toLowerCase()];
+                    break;
+                }
+            }
 
             let assignedStaffName = "";
             let assignedStaffUserId = "";
@@ -54,9 +62,10 @@ const getToilets = async (req, res) => {
             }
 
             let toiletStatus = "clean";
-            if (latestStatus.feedback === 3) {
+            if (latestStatus.feedback === 3 || (latestStatus.OdorSensVal || 0) >= 50) {
                 toiletStatus = "warning";
-            } else if (latestStatus.feedback === 4) {
+            }
+            if (latestStatus.feedback === 4 || (latestStatus.OdorSensVal || 0) >= 80) {
                 toiletStatus = "critical";
             }
 
@@ -68,7 +77,10 @@ const getToilets = async (req, res) => {
                 continue;
             }
 
-            const devLogs = allSensorLogs.filter(log => log.device_uid === device.device_uid);
+            const devLogs = allSensorLogs.filter(log => devUids.some(u =>
+                (log.device_uid && log.device_uid.toLowerCase() === u.toLowerCase()) ||
+                (log.deviceId && log.deviceId.toLowerCase() === u.toLowerCase())
+            ));
 
             let averageRating = 5.0;
             if (devLogs.length > 0) {
@@ -83,11 +95,18 @@ const getToilets = async (req, res) => {
                 averageRating = feedbackToRating(latestStatus.feedback);
             }
 
-            let totalUsage = latestStatus.Counter || 0;
+            let counterVal = Number(latestStatus.Counter) || 0;
+            let odorVal = Number(latestStatus.OdorSensVal) || 0;
+
             if (devLogs.length > 0) {
-                const maxSensorCounter = Math.max(...devLogs.map(l => l.Counter || 0));
-                totalUsage = Math.max(totalUsage, maxSensorCounter);
+                const maxSensorCounter = Math.max(...devLogs.map(l => Number(l.Counter) || 0));
+                if (maxSensorCounter > counterVal) counterVal = maxSensorCounter;
+
+                const maxSensorOdor = Math.max(...devLogs.map(l => Number(l.OdorSensVal) || 0));
+                if (maxSensorOdor > odorVal) odorVal = maxSensorOdor;
             }
+
+            let totalUsage = counterVal;
 
             const deviceTask = completedTasks.find(t => String(t.device) === String(device._id));
             let lastCleanedAt = "";
@@ -132,8 +151,8 @@ const getToilets = async (req, res) => {
                 usageToday: totalUsage,
                 totalUsage: totalUsage,
                 feedback: latestStatus.feedback || 0,
-                Counter: latestStatus.Counter || 0,
-                OdorSensVal: latestStatus.OdorSensVal || 0,
+                Counter: counterVal,
+                OdorSensVal: odorVal,
                 latitude: device.latitude,
                 longitude: device.longitude,
                 timestamp: latestStatus.timestamp || device.createdAt,
