@@ -150,9 +150,16 @@ async function sendTaskAssignedNotification(taskDoc, staffUser, adminUser, devic
         });
 
         // Send FCM Push
-        const userTokens = [];
+        let userTokens = [];
         if (staffUser.fcmToken) userTokens.push(staffUser.fcmToken);
         if (Array.isArray(staffUser.fcmTokens)) userTokens.push(...staffUser.fcmTokens);
+        userTokens = Array.from(new Set(userTokens.filter(Boolean)));
+
+        if (userTokens.length > 0) {
+            const adminUsers = await User.find({ role: "admin", $or: [{ fcmToken: { $in: userTokens } }, { fcmTokens: { $in: userTokens } }] }).select("fcmToken fcmTokens").lean();
+            const adminTokensSet = new Set(adminUsers.flatMap(a => [a.fcmToken, ...(a.fcmTokens || [])].filter(Boolean)));
+            userTokens = userTokens.filter(t => !adminTokensSet.has(t));
+        }
 
         if (userTokens.length > 0) {
             await sendPushNotification({
@@ -261,9 +268,16 @@ async function sendTaskVerifiedNotification(taskDoc, staffUser, adminUser, devic
         });
 
         // Send FCM Push
-        const userTokens = [];
+        let userTokens = [];
         if (staffUser.fcmToken) userTokens.push(staffUser.fcmToken);
         if (Array.isArray(staffUser.fcmTokens)) userTokens.push(...staffUser.fcmTokens);
+        userTokens = Array.from(new Set(userTokens.filter(Boolean)));
+
+        if (userTokens.length > 0) {
+            const adminUsers = await User.find({ role: "admin", $or: [{ fcmToken: { $in: userTokens } }, { fcmTokens: { $in: userTokens } }] }).select("fcmToken fcmTokens").lean();
+            const adminTokensSet = new Set(adminUsers.flatMap(a => [a.fcmToken, ...(a.fcmTokens || [])].filter(Boolean)));
+            userTokens = userTokens.filter(t => !adminTokensSet.has(t));
+        }
 
         if (userTokens.length > 0) {
             await sendPushNotification({

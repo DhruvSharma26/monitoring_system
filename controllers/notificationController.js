@@ -21,6 +21,12 @@ const updateFcmToken = async (req, res, next) => {
             });
         }
 
+        // Disambiguate token: remove this FCM token from any other user accounts
+        await User.updateMany(
+            { _id: { $ne: req.user.id }, $or: [{ fcmToken: fcmToken }, { fcmTokens: fcmToken }] },
+            { $unset: { fcmToken: "" }, $pull: { fcmTokens: fcmToken } }
+        );
+
         user.fcmToken = fcmToken;
         
         // Also maintain array of unique tokens

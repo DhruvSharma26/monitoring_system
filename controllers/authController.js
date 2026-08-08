@@ -181,11 +181,18 @@ const login = async (req, res, next) => {
             }
         );
 
-        const refreshToken = jwt.sign(
-            { id: user._id },
-            process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
-            { expiresIn: "7d" }
-        );
+        const { fcmToken } = req.body;
+        if (fcmToken) {
+            await User.updateMany(
+                { _id: { $ne: user._id }, $or: [{ fcmToken: fcmToken }, { fcmTokens: fcmToken }] },
+                { $unset: { fcmToken: "" }, $pull: { fcmTokens: fcmToken } }
+            );
+            user.fcmToken = fcmToken;
+            if (!user.fcmTokens) user.fcmTokens = [];
+            if (!user.fcmTokens.includes(fcmToken)) {
+                user.fcmTokens.push(fcmToken);
+            }
+        }
 
         user.refreshToken = refreshToken;
         await user.save();
