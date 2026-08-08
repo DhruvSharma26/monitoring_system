@@ -360,7 +360,38 @@ const getDeviceReports = async (req, res) => {
                 timestamp: { $gte: fromDate, $lte: tillDate }
             }).sort({ timestamp: 1 }).lean();
 
-            const lastCompletedTask = await Task.findOne({
+            const completedTasksList = await Task.find({
+                device: device._id,
+                status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] },
+                updatedAt: { $gte: fromDate, $lte: tillDate }
+            }).populate("staff").sort({ updatedAt: -1 }).lean();
+
+            const cleaningLogs = completedTasksList.map(t => {
+                const staffName = t.staff ? (t.staff.name || "Staff Member") : "Unassigned Staff";
+                const staffUserId = t.staff ? (t.staff.userId || "N/A") : "N/A";
+                const staffEmpId = t.staff ? (t.staff.empId || t.staff.userId || "N/A") : "N/A";
+                const assignedTime = (t.assignedAt || t.createdAt)
+                    ? new Date(t.assignedAt || t.createdAt).toLocaleString("en-US", {
+                        day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit"
+                      })
+                    : "N/A";
+                const completionTime = (t.completedAt || t.verifiedAt || t.updatedAt)
+                    ? new Date(t.completedAt || t.verifiedAt || t.updatedAt).toLocaleString("en-US", {
+                        day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit"
+                      })
+                    : "N/A";
+                return {
+                    id: t._id ? t._id.toString() : "",
+                    title: t.title || t.task_type || "Restroom Cleaning & Sanitation",
+                    staffName,
+                    staffUserId,
+                    staffEmpId,
+                    assignedTime,
+                    completionTime
+                };
+            });
+
+            const lastCompletedTask = completedTasksList[0] || await Task.findOne({
                 device: device._id,
                 status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] }
             }).populate("staff").sort({ updatedAt: -1 }).lean();
@@ -441,7 +472,8 @@ const getDeviceReports = async (req, res) => {
                 lastCleanedTimestamp,
                 staffName,
                 staffId,
-                feedback7DaysHistory: feedbackHistory
+                feedback7DaysHistory: feedbackHistory,
+                cleaningLogs
             };
         }));
 
@@ -566,9 +598,44 @@ const downloadReportPdf = async (req, res) => {
         if (incCounter !== "false") doc.fillColor("#333333").fontSize(11).text(`• Total Usage Counter (Entire Period): ${totalUsage} Entries`);
         if (incStaff !== "false") doc.fillColor("#333333").fontSize(11).text(`• Staff Cleaning Log: Last Cleaned ${lastCleaned} by ${staffName} (${staffId})`);
 
-        doc.moveDown();
+        if (incStaff !== "false") {
+            doc.moveDown();
+            doc.fillColor("#0066FF").fontSize(14).text("STAFF CLEANING AUDIT TRAIL");
+            doc.moveDown(0.5);
+
+            const auditTasks = await Task.find({
+                device: device._id,
+                status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] },
+                updatedAt: { $gte: fromDate, $lte: tillDate }
+            }).populate("staff").sort({ updatedAt: -1 }).lean();
+
+            if (auditTasks.length === 0) {
+                doc.fillColor("#666666").fontSize(10).text("No staff cleaning tasks completed during this report period.");
+            } else {
+                for (const t of auditTasks) {
+                    const sName = t.staff ? (t.staff.name || "Staff Member") : "Unassigned Staff";
+                    const sUserId = t.staff ? (t.staff.userId || "N/A") : "N/A";
+                    const sEmpId = t.staff ? (t.staff.empId || t.staff.userId || "N/A") : "N/A";
+                    const aTime = (t.assignedAt || t.createdAt)
+                        ? new Date(t.assignedAt || t.createdAt).toLocaleString("en-US", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
+                        : "N/A";
+                    const cTime = (t.completedAt || t.verifiedAt || t.updatedAt)
+                        ? new Date(t.completedAt || t.verifiedAt || t.updatedAt).toLocaleString("en-US", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
+                        : "N/A";
+
+                    doc.fillColor("#333333").fontSize(10).text(
+                        `• Staff: ${sName} | System ID: ${sUserId} | Emp ID: ${sEmpId}`
+                    );
+                    doc.fillColor("#666666").fontSize(9).text(
+                        `  Task: ${t.title || 'Restroom Cleaning'} | Assigned: ${aTime} | Completed: ${cTime}`
+                    );
+                    doc.moveDown(0.2);
+                }
+            }
+        }
 
         if (incHistory !== "false") {
+            doc.moveDown();
             doc.fillColor("#0066FF").fontSize(14).text("PERIOD HISTORICAL PERFORMANCE BREAKDOWN");
             doc.moveDown(0.5);
 

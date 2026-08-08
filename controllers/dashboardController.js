@@ -11,22 +11,15 @@ const SensorData = require("../models/SensorData");
 const getDashboard = async (req, res) => {
     try {
 
-        const [devices, statuses, liveAlerts] =
+        let devices = await Device.find({ adminId: req.user.id }).sort({ createdAt: -1 }).lean();
+        if (!devices || devices.length === 0) {
+            devices = await Device.find().sort({ createdAt: -1 }).lean();
+        }
+
+        const [statuses, liveAlerts] =
             await Promise.all([
-
-                Device.find({ adminId: req.user.id }).sort({ createdAt: -1 }).lean(),
-
                 LatestDeviceStatus.find().lean(),
-
-                Alert.find({
-                    status: "OPEN"
-                })
-                    .sort({
-                        createdAt: -1
-                    })
-                    .limit(5)
-                    .lean()
-
+                Alert.find({ status: "OPEN" }).sort({ createdAt: -1 }).limit(5).lean()
             ]);
 
         const totalToilets = devices.length;

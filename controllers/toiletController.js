@@ -28,7 +28,7 @@ const getToiletDetails = async (req, res) => {
 
         const targetUids = [device.device_uid, device.deviceId].filter(Boolean);
 
-        const [latestStatus, alerts, tasks, staff, last7DaysSensorLogs, lastCompletedTask] = await Promise.all([
+        const [latestStatus, alerts, tasks, staff, last7DaysSensorLogs, lastCompletedTask, completedTasks7Days] = await Promise.all([
             LatestDeviceStatus.findOne({ device_uid: { $in: targetUids } }).lean(),
             Alert.find({ device_uid: { $in: targetUids } }).sort({ createdAt: -1 }).limit(10).lean(),
             Task.find({ device: device._id }).populate("staff").sort({ createdAt: -1 }),
@@ -37,7 +37,12 @@ const getToiletDetails = async (req, res) => {
                 device_uid: { $in: targetUids },
                 timestamp: { $gte: sevenDaysAgo }
             }).sort({ timestamp: 1 }).lean(),
-            Task.findOne({ device: device._id, status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] } }).populate("staff", "name empId userId").sort({ updatedAt: -1 }).lean()
+            Task.findOne({ device: device._id, status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] } }).populate("staff", "name empId userId").sort({ updatedAt: -1 }).lean(),
+            Task.find({
+                device: device._id,
+                status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] },
+                updatedAt: { $gte: sevenDaysAgo }
+            }).lean()
         ]);
 
         let status = "clean";
@@ -87,6 +92,7 @@ const getToiletDetails = async (req, res) => {
         const counterHistory = [];
         const odorHistory = [];
         const ratingHistory = [];
+        const cleaningHistory = [];
 
         for (let i = 6; i >= 0; i--) {
             const dayStart = new Date();
@@ -104,6 +110,14 @@ const getToiletDetails = async (req, res) => {
                 const logTime = new Date(log.timestamp).getTime();
                 return logTime >= dayStart.getTime() && logTime <= dayEnd.getTime();
             });
+
+            // Cleaning count per day from completed tasks
+            const dayCleaningTasks = (completedTasks7Days || []).filter(task => {
+                const taskDate = new Date(task.updatedAt || task.completedAt || task.verifiedAt || task.createdAt);
+                const taskTime = taskDate.getTime();
+                return taskTime >= dayStart.getTime() && taskTime <= dayEnd.getTime();
+            });
+            const dayCleaningCount = dayCleaningTasks.length;
 
             let dayCounter = 0;
             let dayOdor = 0;
@@ -142,6 +156,7 @@ const getToiletDetails = async (req, res) => {
             counterHistory.push({ day: dayLabel, date: dateStr, value: dayCounter });
             odorHistory.push({ day: dayLabel, date: dateStr, value: dayOdor });
             ratingHistory.push({ day: dayLabel, date: dateStr, value: dayRating });
+            cleaningHistory.push({ day: dayLabel, date: dateStr, value: dayCleaningCount });
         }
 
         let averageRating = 5.0;
@@ -183,7 +198,8 @@ const getToiletDetails = async (req, res) => {
             weeklyAnalysis: {
                 counterHistory,
                 odorHistory,
-                ratingHistory
+                ratingHistory,
+                cleaningHistory
             },
             staff,
             alerts,
