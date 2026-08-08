@@ -67,7 +67,14 @@ const getAlerts = async (req, res) => {
         }
 
         const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
-        const alerts = await Alert.find(query).sort({ createdAt: -1 }).lean();
+        let alerts = await Alert.find(query).sort({ createdAt: -1 }).lean();
+
+        // Fallback: If query returned 0 alerts and user is admin/system, fetch all system alerts
+        if (alerts.length === 0 && (!req.user || req.user.role !== 'staff')) {
+            const fallbackQuery = { ...query };
+            delete fallbackQuery.$or;
+            alerts = await Alert.find(fallbackQuery).sort({ createdAt: -1 }).lean();
+        }
 
         const seenActiveDevices = new Set();
         const latestAlerts = [];
