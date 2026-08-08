@@ -38,6 +38,11 @@ const userSchema = new mongoose.Schema(
 
     empId: String,
 
+    adminId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User"
+    },
+
     assignedDevice: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Device"

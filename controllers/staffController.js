@@ -81,6 +81,7 @@ const registerStaff = async (req, res) => {
         const staff = await User.create({
             userId: staffId,
             role: "staff",
+            adminId: req.user.id,
             name,
             email: normalizedEmail,
             mobile,
@@ -130,7 +131,10 @@ const getStaff = async (req, res) => {
 
         const staff = await User.find({
             role: "staff",
-            assignedDevice: { $in: myDeviceIds }
+            $or: [
+                { adminId: req.user.id },
+                { assignedDevice: { $in: myDeviceIds } }
+            ]
         }).populate("assignedDevice");
 
         res.status(200).json({

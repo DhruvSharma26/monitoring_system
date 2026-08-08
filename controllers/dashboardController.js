@@ -549,6 +549,7 @@ const getToiletRatingComparison = async (req, res) => {
 
         const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
         const now = new Date();
+        const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(now.getDate() - 6);
         sevenDaysAgo.setHours(0, 0, 0, 0);
@@ -566,14 +567,31 @@ const getToiletRatingComparison = async (req, res) => {
             return 5.0;
         };
 
-        const toiletData = devices.map((device, index) => {
-            const devLogs = sensorLogs.filter(log => log.device_uid === device.device_uid || log.device_uid === device.deviceId);
+        const toiletData = devices.map((device) => {
+            const devLogs7Days = sensorLogs.filter(log => log.device_uid === device.device_uid || log.device_uid === device.deviceId);
+            const devLogs24h = devLogs7Days.filter(log => new Date(log.timestamp).getTime() >= twentyFourHoursAgo.getTime());
             const statusObj = statusMap[device.device_uid] || statusMap[device.deviceId];
 
-            const dailyRatings = [];
-            let sumRating = 0;
-            let ratingCount = 0;
+            // Compute last 24 hours average rating for this device
+            let avgRating24h = 5.0;
+            if (devLogs24h.length > 0) {
+                const explicitLogs = devLogs24h.filter(l => l.feedback !== undefined && l.feedback !== null && Number(l.feedback) > 0);
+                if (explicitLogs.length > 0) {
+                    const sumRating = explicitLogs.reduce((acc, log) => acc + feedbackToRating(Number(log.feedback)), 0);
+                    avgRating24h = parseFloat((sumRating / explicitLogs.length).toFixed(1));
+                } else {
+                    const highOdor = devLogs24h.some(l => (Number(l.OdorSensVal) || 0) >= 80);
+                    const warningOdor = devLogs24h.some(l => (Number(l.OdorSensVal) || 0) >= 50);
+                    avgRating24h = highOdor ? 1.0 : (warningOdor ? 2.5 : 5.0);
+                }
+            } else if (statusObj && statusObj.feedback !== undefined && statusObj.feedback !== null && Number(statusObj.feedback) > 0) {
+                avgRating24h = feedbackToRating(Number(statusObj.feedback));
+            } else if (statusObj && statusObj.OdorSensVal !== undefined) {
+                const odor = Number(statusObj.OdorSensVal) || 0;
+                avgRating24h = odor >= 80 ? 1.0 : (odor >= 50 ? 2.5 : 5.0);
+            }
 
+            const dailyRatings = [];
             for (let i = 6; i >= 0; i--) {
                 const dayStart = new Date();
                 dayStart.setDate(now.getDate() - i);
@@ -586,7 +604,7 @@ const getToiletRatingComparison = async (req, res) => {
                 const dateStr = dayStart.toISOString().split("T")[0];
                 const dayLabel = dayNames[dayStart.getDay()];
 
-                const dayLogs = devLogs.filter(log => {
+                const dayLogs = devLogs7Days.filter(log => {
                     const logTime = new Date(log.timestamp).getTime();
                     return logTime >= dayStart.getTime() && logTime <= dayEnd.getTime();
                 });
@@ -602,8 +620,13 @@ const getToiletRatingComparison = async (req, res) => {
                         const warningOdor = dayLogs.some(l => (Number(l.OdorSensVal) || 0) >= 50);
                         dayRating = highOdor ? 1.0 : (warningOdor ? 2.5 : 5.0);
                     }
-                    sumRating += dayRating;
-                    ratingCount++;
+                } else if (i === 0 && statusObj) {
+                    if (statusObj.feedback !== undefined && statusObj.feedback > 0) {
+                        dayRating = feedbackToRating(statusObj.feedback);
+                    } else {
+                        const odor = Number(statusObj.OdorSensVal) || 0;
+                        dayRating = odor >= 80 ? 1.0 : (odor >= 50 ? 2.5 : 5.0);
+                    }
                 }
 
                 dailyRatings.push({
@@ -612,8 +635,6 @@ const getToiletRatingComparison = async (req, res) => {
                     rating: dayRating
                 });
             }
-
-            const avgRating = ratingCount > 0 ? parseFloat((sumRating / ratingCount).toFixed(1)) : 5.0;
 
             let status = "clean";
             if (statusObj) {
@@ -625,8 +646,8 @@ const getToiletRatingComparison = async (req, res) => {
                 device_uid: device.device_uid,
                 deviceId: device.deviceId || device.device_uid,
                 location: device.location || "Unknown Location",
-                averageRating: avgRating,
-                totalFeedbacks: devLogs.length,
+                averageRating: avgRating24h,
+                totalFeedbacks: devLogs24h.length,
                 status,
                 dailyRatings
             };
@@ -638,7 +659,7 @@ const getToiletRatingComparison = async (req, res) => {
 
         res.status(200).json({
             success: true,
-            period: "Last 7 Days",
+            period: "Last 24 Hours",
             cityAverage,
             toilets: toiletData
         });
