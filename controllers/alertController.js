@@ -236,23 +236,19 @@ const getAlerts = async (req, res) => {
 
         let finalAlerts = mergedAlerts;
         if (req.user && req.user.role === 'staff' && staffUserObj) {
-            const staffIdStr = staffUserObj._id.toString();
-            const staffEmpId = (staffUserObj.empId || "").trim().toLowerCase();
-            const staffUserId = (staffUserObj.userId || "").trim().toLowerCase();
-
             finalAlerts = mergedAlerts.filter(alertItem => {
                 const isResolved = alertItem.status === "RESOLVED" || alertItem.taskStatus === "VERIFIED" || alertItem.taskStatus === "COMPLETED" || alertItem.taskStatus === "RESOLVED";
 
+                // Staff sees NO resolved alarms (Resolved alarms tab removed)
                 if (isResolved) {
-                    const itemStaffId = (alertItem.staffId || "").toString();
-                    const itemEmpId = (alertItem.assignedStaffEmpId || "").trim().toLowerCase();
+                    return false;
+                }
 
-                    const matchesThisStaff =
-                        (itemStaffId && itemStaffId === staffIdStr) ||
-                        (staffEmpId && itemEmpId === staffEmpId) ||
-                        (staffUserId && itemEmpId === staffUserId);
-
-                    return matchesThisStaff;
+                // Verify alert creation timestamp is strictly after staff creation timestamp
+                if (staffUserObj.createdAt && alertItem.createdAt) {
+                    if (new Date(alertItem.createdAt) < new Date(staffUserObj.createdAt)) {
+                        return false;
+                    }
                 }
 
                 return true;
