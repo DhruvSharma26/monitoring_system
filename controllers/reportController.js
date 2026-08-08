@@ -67,74 +67,70 @@ const computePeriodMetrics = (sensorLogs, statusObj) => {
     const logs7d = sensorLogs.filter(l => new Date(l.timestamp).getTime() >= sevenDaysAgo.getTime());
 
     // 1. Last 24 Hours Metrics
-    let averageRating24h = 5.0;
+    let averageRating24h = "N/A";
+    let averageOdor24h = "N/A";
+    let totalUsage24h = "N/A";
+
     if (logs24h.length > 0) {
         const explicit = logs24h.filter(l => l.feedback !== undefined && l.feedback !== null && Number(l.feedback) > 0);
         if (explicit.length > 0) {
             const sum = explicit.reduce((acc, l) => acc + feedbackToRating(Number(l.feedback)), 0);
-            averageRating24h = parseFloat((sum / explicit.length).toFixed(1));
+            averageRating24h = `${(sum / explicit.length).toFixed(1)}`;
         } else {
             const highOdor = logs24h.some(l => (Number(l.OdorSensVal) || 0) >= 80);
             const warningOdor = logs24h.some(l => (Number(l.OdorSensVal) || 0) >= 50);
-            averageRating24h = highOdor ? 1.0 : (warningOdor ? 2.5 : 5.0);
+            averageRating24h = highOdor ? "1.0" : (warningOdor ? "2.5" : "5.0");
         }
-    } else if (statusObj && statusObj.feedback !== undefined && statusObj.feedback !== null && Number(statusObj.feedback) > 0) {
-        averageRating24h = feedbackToRating(Number(statusObj.feedback));
-    } else if (statusObj && statusObj.OdorSensVal !== undefined) {
-        const odor = Number(statusObj.OdorSensVal) || 0;
-        averageRating24h = odor >= 80 ? 1.0 : (odor >= 50 ? 2.5 : 5.0);
-    }
 
-    let averageOdor24h = 0;
-    if (logs24h.length > 0) {
         const sumOdor = logs24h.reduce((acc, l) => acc + (Number(l.OdorSensVal) || 0), 0);
-        averageOdor24h = Math.round(sumOdor / logs24h.length);
-    } else if (statusObj && statusObj.OdorSensVal !== undefined) {
-        averageOdor24h = Number(statusObj.OdorSensVal) || 0;
-    }
+        averageOdor24h = `${Math.round(sumOdor / logs24h.length)}`;
 
-    let totalUsage24h = 0;
-    if (logs24h.length > 0) {
+        let maxC = 0;
         for (const l of logs24h) {
             const c = Number(l.Counter) || 0;
-            if (c > totalUsage24h) totalUsage24h = c;
+            if (c > maxC) maxC = c;
         }
-    } else if (statusObj && statusObj.Counter !== undefined) {
-        totalUsage24h = Number(statusObj.Counter) || 0;
+        totalUsage24h = `${maxC}`;
+    } else if (statusObj) {
+        if (statusObj.feedback !== undefined && statusObj.feedback !== null && Number(statusObj.feedback) > 0) {
+            averageRating24h = `${feedbackToRating(Number(statusObj.feedback))}`;
+        }
+        if (statusObj.OdorSensVal !== undefined) {
+            averageOdor24h = `${Number(statusObj.OdorSensVal) || 0}`;
+        }
+        if (statusObj.Counter !== undefined) {
+            totalUsage24h = `${Number(statusObj.Counter) || 0}`;
+        }
     }
 
     // 2. Last 1 Week (7 Days) Metrics
-    const logs7dOrAll = logs7d.length > 0 ? logs7d : sensorLogs;
-    let averageRating7Days = 5.0;
-    if (logs7dOrAll.length > 0) {
-        const explicit = logs7dOrAll.filter(l => l.feedback !== undefined && l.feedback !== null && Number(l.feedback) > 0);
+    let averageRating7Days = "N/A";
+    let averageOdor7Days = "N/A";
+    let totalUsage7Days = "N/A";
+
+    if (logs7d.length > 0) {
+        const explicit = logs7d.filter(l => l.feedback !== undefined && l.feedback !== null && Number(l.feedback) > 0);
         if (explicit.length > 0) {
             const sum = explicit.reduce((acc, l) => acc + feedbackToRating(Number(l.feedback)), 0);
-            averageRating7Days = parseFloat((sum / explicit.length).toFixed(1));
+            averageRating7Days = `${(sum / explicit.length).toFixed(1)}`;
         } else {
-            const highOdor = logs7dOrAll.some(l => (Number(l.OdorSensVal) || 0) >= 80);
-            const warningOdor = logs7dOrAll.some(l => (Number(l.OdorSensVal) || 0) >= 50);
-            averageRating7Days = highOdor ? 1.0 : (warningOdor ? 2.5 : 5.0);
+            const highOdor = logs7d.some(l => (Number(l.OdorSensVal) || 0) >= 80);
+            const warningOdor = logs7d.some(l => (Number(l.OdorSensVal) || 0) >= 50);
+            averageRating7Days = highOdor ? "1.0" : (warningOdor ? "2.5" : "5.0");
         }
+
+        const sumOdor = logs7d.reduce((acc, l) => acc + (Number(l.OdorSensVal) || 0), 0);
+        averageOdor7Days = `${Math.round(sumOdor / logs7d.length)}`;
+
+        let maxC = 0;
+        for (const l of logs7d) {
+            const c = Number(l.Counter) || 0;
+            if (c > maxC) maxC = c;
+        }
+        totalUsage7Days = `${maxC}`;
     } else {
         averageRating7Days = averageRating24h;
-    }
-
-    let averageOdor7Days = 0;
-    if (logs7dOrAll.length > 0) {
-        const sumOdor = logs7dOrAll.reduce((acc, l) => acc + (Number(l.OdorSensVal) || 0), 0);
-        averageOdor7Days = Math.round(sumOdor / logs7dOrAll.length);
-    } else {
         averageOdor7Days = averageOdor24h;
-    }
-
-    let totalUsage7Days = 0;
-    if (logs7dOrAll.length > 0) {
-        for (const l of logs7dOrAll) {
-            const c = Number(l.Counter) || 0;
-            if (c > totalUsage7Days) totalUsage7Days = c;
-        }
-    } else {
         totalUsage7Days = totalUsage24h;
     }
 
@@ -167,16 +163,12 @@ const getAdminDeviceScope = async (userObj) => {
     return { devices, deviceIds, deviceUids };
 };
 
-// Helper to calculate daily telemetry breakdown from real sensor logs
+// Helper to calculate daily telemetry breakdown from real sensor logs (Authentic Data)
 const calculateDailyBreakdown = (sensorLogs, fromDate, tillDate, statusObj) => {
     const dayNamesShort = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const dayNamesFull = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     const history = [];
     const daysDiff = Math.max(1, Math.min(60, Math.ceil((tillDate - fromDate) / (1000 * 60 * 60 * 24))));
-
-    const baseOdor = Number(statusObj?.OdorSensVal) || 22;
-    const baseCounter = Number(statusObj?.Counter) || 120;
-    const baseRating = statusObj?.feedback ? feedbackToRating(statusObj.feedback) : 4.5;
 
     for (let i = daysDiff - 1; i >= 0; i--) {
         const d = new Date(tillDate.getTime());
@@ -192,14 +184,14 @@ const calculateDailyBreakdown = (sensorLogs, fromDate, tillDate, statusObj) => {
 
         if (dayLogs.length > 0) {
             const explicit = dayLogs.filter(l => l.feedback !== undefined && l.feedback !== null && Number(l.feedback) > 0);
-            let dayRating = 5.0;
+            let dayRatingStr = "5.0";
             if (explicit.length > 0) {
                 const sum = explicit.reduce((acc, l) => acc + feedbackToRating(Number(l.feedback)), 0);
-                dayRating = parseFloat((sum / explicit.length).toFixed(1));
+                dayRatingStr = (sum / explicit.length).toFixed(1);
             } else {
                 const highOdor = dayLogs.some(l => (Number(l.OdorSensVal) || 0) >= 80);
                 const warningOdor = dayLogs.some(l => (Number(l.OdorSensVal) || 0) >= 50);
-                dayRating = highOdor ? 1.0 : (warningOdor ? 2.5 : 5.0);
+                dayRatingStr = highOdor ? "1.0" : (warningOdor ? "2.5" : "5.0");
             }
 
             const sumOdor = dayLogs.reduce((acc, l) => acc + (Number(l.OdorSensVal) || 0), 0);
@@ -215,35 +207,21 @@ const calculateDailyBreakdown = (sensorLogs, fromDate, tillDate, statusObj) => {
                 day: dayLabel,
                 dayFull: dayFullLabel,
                 date: dateStr,
-                rating: dayRating,
-                odor: dayOdor,
-                counter: dayCounter,
+                rating: `${dayRatingStr}`,
+                odor: `${dayOdor}`,
+                counter: `${dayCounter}`,
                 totalFeedback: dayFeedbackCount
             });
         } else {
-            // Dynamic day-by-day telemetry calculation
-            const dayOfWeek = d.getDay(); // 0 = Sun, 6 = Sat
-            const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-
-            const counterFactor = isWeekend ? 0.65 + ((i % 3) * 0.1) : 0.88 + ((i % 4) * 0.12);
-            const dayCounter = Math.max(15, Math.round(baseCounter * counterFactor));
-
-            const odorVariance = ((i * 7 + dayOfWeek * 13) % 15) - 7;
-            const dayOdor = Math.max(5, Math.min(95, Math.round(baseOdor + odorVariance)));
-
-            const ratingVariance = (((i * 3 + dayOfWeek * 5) % 9) - 4) * 0.1;
-            const dayRating = parseFloat(Math.min(5.0, Math.max(1.0, baseRating + ratingVariance)).toFixed(1));
-
-            const dayFeedbackCount = Math.max(1, Math.round(dayCounter * 0.12));
-
+            // Authentic Data Only: If no DB log exists for this date, render N/A
             history.push({
                 day: dayLabel,
                 dayFull: dayFullLabel,
                 date: dateStr,
-                rating: dayRating,
-                odor: dayOdor,
-                counter: dayCounter,
-                totalFeedback: dayFeedbackCount
+                rating: "N/A",
+                odor: "N/A",
+                counter: "0",
+                totalFeedback: 0
             });
         }
     }
@@ -709,17 +687,17 @@ const downloadReportPdf = async (req, res) => {
         doc.moveDown(0.5);
 
         if (incStatus !== "false") doc.fillColor("#333333").fontSize(11).text(`• Current Device Status: ${status}`);
-        if (incRating !== "false") doc.fillColor("#333333").fontSize(11).text(`• Average Star Rating (Last 24 Hours): ${metrics.averageRating24h} / 5.0`);
-        if (incOdor !== "false") doc.fillColor("#333333").fontSize(11).text(`• Average Odor Level (Last 24 Hours): ${metrics.averageOdor24h} PPM`);
-        if (incCounter !== "false") doc.fillColor("#333333").fontSize(11).text(`• Total Visitor Usage Counter (Last 24 Hours): ${metrics.totalUsage24h} Entries`);
+        if (incRating !== "false") doc.fillColor("#333333").fontSize(11).text(`• Average Star Rating (Last 24 Hours): ${metrics.averageRating24h}${metrics.averageRating24h === 'N/A' ? '' : ' / 5.0'}`);
+        if (incOdor !== "false") doc.fillColor("#333333").fontSize(11).text(`• Average Odor Level (Last 24 Hours): ${metrics.averageOdor24h}${metrics.averageOdor24h === 'N/A' ? '' : ' PPM'}`);
+        if (incCounter !== "false") doc.fillColor("#333333").fontSize(11).text(`• Total Visitor Usage Counter (Last 24 Hours): ${metrics.totalUsage24h}${metrics.totalUsage24h === 'N/A' ? '' : ' Entries'}`);
         if (incStaff !== "false") doc.fillColor("#333333").fontSize(11).text(`• Staff Cleaning Log: Last Cleaned ${lastCleaned} by ${staffName} (${staffId})`);
 
         doc.moveDown();
         doc.fillColor("#0066FF").fontSize(14).text("LAST 1 WEEK (7 DAYS) PERFORMANCE SUMMARY");
         doc.moveDown(0.5);
-        if (incRating !== "false") doc.fillColor("#333333").fontSize(11).text(`• Average Star Rating (Last 1 Week): ${metrics.averageRating7Days} / 5.0`);
-        if (incOdor !== "false") doc.fillColor("#333333").fontSize(11).text(`• Average Odor Level (Last 1 Week): ${metrics.averageOdor7Days} PPM`);
-        if (incCounter !== "false") doc.fillColor("#333333").fontSize(11).text(`• Total Visitor Usage Counter (Last 1 Week): ${metrics.totalUsage7Days} Entries`);
+        if (incRating !== "false") doc.fillColor("#333333").fontSize(11).text(`• Average Star Rating (Last 1 Week): ${metrics.averageRating7Days}${metrics.averageRating7Days === 'N/A' ? '' : ' / 5.0'}`);
+        if (incOdor !== "false") doc.fillColor("#333333").fontSize(11).text(`• Average Odor Level (Last 1 Week): ${metrics.averageOdor7Days}${metrics.averageOdor7Days === 'N/A' ? '' : ' PPM'}`);
+        if (incCounter !== "false") doc.fillColor("#333333").fontSize(11).text(`• Total Visitor Usage Counter (Last 1 Week): ${metrics.totalUsage7Days}${metrics.totalUsage7Days === 'N/A' ? '' : ' Entries'}`);
 
         doc.moveDown(0.8);
         doc.fillColor("#0066FF").fontSize(12).text("LAST 1 WEEK DAYWISE BREAKDOWN TABLE", { underline: true });
@@ -729,6 +707,11 @@ const downloadReportPdf = async (req, res) => {
         
         const tableStartX = 40;
         let tableY = doc.y;
+
+        if (tableY > 640) {
+            doc.addPage();
+            tableY = 40;
+        }
         
         // Draw Header Box
         doc.rect(tableStartX, tableY, 510, 20).fill("#0066FF");
@@ -744,24 +727,42 @@ const downloadReportPdf = async (req, res) => {
         doc.font("Helvetica");
 
         historyListPdf.forEach((item, idx) => {
+            if (tableY > 740) {
+                doc.addPage();
+                tableY = 40;
+                doc.rect(tableStartX, tableY, 510, 20).fill("#0066FF");
+                doc.fillColor("#FFFFFF").fontSize(9).font("Helvetica-Bold");
+                doc.text("Day", tableStartX + 8, tableY + 5, { width: 80 });
+                doc.text("Date", tableStartX + 90, tableY + 5, { width: 75 });
+                doc.text("Avg Rating", tableStartX + 170, tableY + 5, { width: 75 });
+                doc.text("Avg Odor", tableStartX + 250, tableY + 5, { width: 75 });
+                doc.text("Visitor Usages", tableStartX + 330, tableY + 5, { width: 90 });
+                doc.text("Feedbacks", tableStartX + 430, tableY + 5, { width: 70 });
+                tableY += 20;
+                doc.font("Helvetica");
+            }
+
             const rowBg = idx % 2 === 0 ? "#F8F9FA" : "#FFFFFF";
             doc.rect(tableStartX, tableY, 510, 18).fill(rowBg);
             doc.fillColor("#333333").fontSize(9);
             doc.text(`${item.dayFull || item.day}`, tableStartX + 8, tableY + 4, { width: 80 });
             doc.text(`${item.date}`, tableStartX + 90, tableY + 4, { width: 75 });
-            doc.text(`${item.rating} / 5.0`, tableStartX + 170, tableY + 4, { width: 75 });
-            doc.text(`${item.odor} PPM`, tableStartX + 250, tableY + 4, { width: 75 });
+            doc.text(item.rating === 'N/A' ? 'N/A' : `${item.rating} / 5.0`, tableStartX + 170, tableY + 4, { width: 75 });
+            doc.text(item.odor === 'N/A' ? 'N/A' : `${item.odor} PPM`, tableStartX + 250, tableY + 4, { width: 75 });
             doc.text(`${item.counter}`, tableStartX + 330, tableY + 4, { width: 90 });
             doc.text(`${item.totalFeedback}`, tableStartX + 430, tableY + 4, { width: 70 });
             tableY += 18;
         });
 
-        // Grid border
-        doc.strokeColor("#CCCCCC").lineWidth(0.5).rect(tableStartX, doc.y - 20, 510, historyListPdf.length * 18 + 20).stroke();
-        doc.y = tableY + 10;
+        doc.y = tableY + 15;
 
         if (incStaff !== "false") {
-            doc.moveDown();
+            if (doc.y > 580) {
+                doc.addPage();
+            } else {
+                doc.moveDown(1);
+            }
+
             doc.fillColor("#0066FF").fontSize(14).text("STAFF CLEANING AUDIT TRAIL");
             doc.moveDown(0.5);
 
@@ -775,6 +776,9 @@ const downloadReportPdf = async (req, res) => {
                 doc.fillColor("#666666").fontSize(10).text("No staff cleaning tasks completed during this report period.");
             } else {
                 for (const t of auditTasks) {
+                    if (doc.y > 730) {
+                        doc.addPage();
+                    }
                     const sName = t.staff ? (t.staff.name || "Staff Member") : "Unassigned Staff";
                     const sUserId = t.staff ? (t.staff.userId || "N/A") : "N/A";
                     const sEmpId = t.staff ? (t.staff.empId || t.staff.userId || "N/A") : "N/A";
@@ -791,7 +795,7 @@ const downloadReportPdf = async (req, res) => {
                     doc.fillColor("#666666").fontSize(9).text(
                         `  Assigned: ${aTime} | Completed: ${cTime}`
                     );
-                    doc.moveDown(0.2);
+                    doc.moveDown(0.3);
                 }
             }
         }
