@@ -24,57 +24,88 @@ function broadcastTaskUpdate(task, eventName = "task_status_updated") {
 // Assign Task
 const assignTask = async (req, res) => {
     try {
-        const { staffId, deviceId } = req.body;
+        const { staffId, deviceId, taskName, notes } = req.body;
 
-        const staff = await User.findOne({
-            $or: [{ userId: staffId }, { empId: staffId }],
-            role: "staff"
-        });
+        if (!staffId) {
+            return res.status(400).json({ success: false, message: "Staff ID is required" });
+        }
+
+        const isObjectId = mongoose.Types.ObjectId.isValid(staffId);
+        let staff = null;
+        if (isObjectId) {
+            staff = await User.findOne({ _id: staffId, role: "staff" });
+        }
+        if (!staff) {
+            staff = await User.findOne({
+                $or: [{ userId: staffId }, { empId: staffId }, { email: staffId }],
+                role: "staff"
+            });
+        }
+        if (!staff) {
+            staff = await User.findOne({
+                $or: [{ _id: isObjectId ? staffId : null }, { userId: staffId }, { empId: staffId }, { email: staffId }]
+            });
+        }
 
         if (!staff) {
             return res.status(404).json({
                 success: false,
-                message: "Staff not found"
+                message: "Staff member not found"
             });
         }
 
-        const device = await Device.findById(deviceId);
-        if (!device) {
-            return res.status(404).json({
-                success: false,
-                message: "Device not found"
+        let device = null;
+        if (deviceId) {
+            const isDevObjectId = mongoose.Types.ObjectId.isValid(deviceId);
+            device = await Device.findOne({
+                $or: isDevObjectId
+                    ? [{ _id: deviceId }, { device_uid: deviceId }, { deviceId: deviceId }]
+                    : [{ device_uid: deviceId }, { deviceId: deviceId }]
             });
+        }
+        if (!device && staff.assignedDevice) {
+            device = await Device.findById(staff.assignedDevice);
         }
 
         const now = new Date();
         const task = await Task.create({
+            taskName: taskName || "Restroom Cleaning & Hygiene Maintenance",
             staff: staff._id,
-            device: device._id,
-            assignedBy: req.user.id,
+            device: device ? device._id : null,
+            assignedBy: req.user ? req.user.id : null,
             assignedAt: now,
             status: "ASSIGNED",
+            notes: notes || "Assigned by Admin",
             timeline: [{
                 status: "ASSIGNED",
                 timestamp: now,
-                updatedBy: req.user.id,
+                updatedBy: req.user ? req.user.id : null,
                 notes: "Task assigned by admin"
             }]
         });
 
-        // Trigger notification to staff
-        const notificationService = require("../services/notificationService");
-        notificationService.sendTaskAssignedNotification(task, staff, req.user, device);
+        if (device) {
+            device.assignedStaff = staff._id;
+            await device.save();
+        }
+
+        try {
+            const notificationService = require("../services/notificationService");
+            notificationService.sendTaskAssignedNotification(task, staff, req.user, device);
+        } catch (err) {
+            console.log("Error sending task notification:", err.message);
+        }
 
         broadcastTaskUpdate(task);
 
         res.status(201).json({
             success: true,
-            message: "Task Assigned",
+            message: "Task Assigned Successfully",
             task
         });
     } catch (error) {
-        console.log(error);
-        res.status(500).json({ success: false, message: "Server Error" });
+        console.log("Error assigning task:", error);
+        res.status(500).json({ success: false, message: error.message || "Server Error" });
     }
 };
 
@@ -317,27 +348,48 @@ const verifyTask = async (req, res) => {
 // Get My Tasks (Staff)
 const getMyTasks = async (req, res) => {
     try {
+        let staffIds = [];
         let staffQueryId = req.user ? req.user.id : null;
         const requestedId = req.params.staffId || req.query.staffId;
+        const targetId = requestedId || staffQueryId;
 
-        if (requestedId) {
-            const staffObj = await User.findOne({
+        let staffObj = null;
+        if (targetId) {
+            const isObjectId = mongoose.Types.ObjectId.isValid(targetId);
+            staffObj = await User.findOne({
                 $or: [
-                    { userId: requestedId },
-                    { empId: requestedId },
-                    { email: requestedId }
+                    ...(isObjectId ? [{ _id: targetId }] : []),
+                    { userId: targetId },
+                    { empId: targetId },
+                    { email: targetId }
                 ]
             });
+
             if (staffObj) {
-                staffQueryId = staffObj._id;
-            } else if (requestedId.match(/^[0-9a-fA-F]{24}$/)) {
-                staffQueryId = requestedId;
+                staffIds.push(staffObj._id);
+                if (staffObj.userId) staffIds.push(staffObj.userId);
+                if (staffObj.empId) staffIds.push(staffObj.empId);
+            } else if (isObjectId) {
+                staffIds.push(targetId);
             }
         }
 
-        const query = staffQueryId ? { staff: staffQueryId } : {};
+        let query = {};
+        if (staffIds.length > 0) {
+            query = {
+                $or: [
+                    { staff: { $in: staffIds } },
+                    { assignedStaff: { $in: staffIds } }
+                ]
+            };
+            if (staffObj && staffObj.assignedDevice) {
+                query.$or.push({ device: staffObj.assignedDevice });
+            }
+        }
+
         const tasks = await Task.find(query)
             .populate("device")
+            .populate("staff", "name empId userId email")
             .sort({ createdAt: -1 });
 
         res.status(200).json({

@@ -365,32 +365,71 @@ const assignAlert = async (req, res) => {
         const alert = await Alert.findById(alertId);
         if (!alert) return res.status(404).json({ success: false, message: "Alert not found" });
         
-        const staff = await User.findOne({ 
-            $or: [{ userId: staff_id }, { empId: staff_id }], 
-            role: "staff" 
-        });
-        if (!staff) return res.status(404).json({ success: false, message: "Staff not found" });
+        const isObjectId = mongoose.Types.ObjectId.isValid(staff_id);
+        let staff = null;
+        if (isObjectId) {
+            staff = await User.findOne({ _id: staff_id, role: "staff" });
+        }
+        if (!staff) {
+            staff = await User.findOne({ 
+                $or: [{ userId: staff_id }, { empId: staff_id }, { email: staff_id }], 
+                role: "staff" 
+            });
+        }
+        if (!staff) {
+            staff = await User.findOne({ 
+                $or: [{ _id: isObjectId ? staff_id : null }, { userId: staff_id }, { empId: staff_id }, { email: staff_id }]
+            });
+        }
+        if (!staff) return res.status(404).json({ success: false, message: "Staff member not found" });
 
-        const device = await Device.findOne({ device_uid: alert.device_uid });
+        const device = await Device.findOne({
+            $or: [
+                { device_uid: alert.device_uid },
+                { deviceId: alert.device_uid },
+                { device_uid: alert.deviceId },
+                { deviceId: alert.deviceId }
+            ]
+        });
         
+        const now = new Date();
         const task = await Task.create({
             alert: alert._id,
             device: device ? device._id : null,
             staff: staff._id,
-            assignedBy: req.user.id,
-            status: "ASSIGNED"
+            assignedBy: req.user ? req.user.id : null,
+            assignedAt: now,
+            status: "ASSIGNED",
+            timeline: [{
+                status: "ASSIGNED",
+                timestamp: now,
+                updatedBy: req.user ? req.user.id : null,
+                notes: "Alert task assigned by admin"
+            }]
         });
 
         alert.status = "ASSIGNED";
         await alert.save();
         
-        // Notify assigned staff
-        const notificationService = require("../services/notificationService");
-        notificationService.sendTaskAssignedNotification(task, staff, req.user, device);
+        if (device) {
+            device.assignedStaff = staff._id;
+            await device.save();
+        }
 
-        res.status(200).json({ success: true, message: "Alert assigned" });
+        try {
+            const notificationService = require("../services/notificationService");
+            notificationService.sendTaskAssignedNotification(task, staff, req.user, device);
+        } catch (err) {
+            console.log("Error sending notification:", err.message);
+        }
+
+        if (global.io) {
+            global.io.emit("task_status_updated", { taskId: task._id, status: "ASSIGNED", staffId: staff._id });
+        }
+
+        res.status(200).json({ success: true, message: "Alert assigned successfully", task });
     } catch (error) {
-        console.log(error);
+        console.log("Error in assignAlert:", error);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 };
