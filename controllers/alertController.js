@@ -76,85 +76,43 @@ const getAlerts = async (req, res) => {
             alerts = await Alert.find(fallbackQuery).sort({ createdAt: -1 }).lean();
         }
 
-        // Additional Fail-Safe: Synthesize alerts from LatestDeviceStatus and Tasks if Alert collection has no items
-        if (alerts.length === 0) {
-            const statuses = await LatestDeviceStatus.find({
-                $or: [
-                    { OdorSensVal: { $gt: 50 } },
-                    { Counter: { $gt: 200 } },
-                    { feedback: { $gte: 3 } }
-                ]
-            }).lean();
-
-            for (const s of statuses) {
-                const devUid = s.device_uid || s.deviceId || '';
-                if (!devUid) continue;
-                let alertType = 'HIGH_ODOR';
-                if (s.feedback === 4) alertType = 'CRITICAL_FEEDBACK';
-                else if (s.feedback === 3) alertType = 'WARNING_FEEDBACK';
-                else if (s.Counter > 200) alertType = 'HIGH_USAGE';
-
-                alerts.push({
-                    _id: s._id,
-                    device_uid: devUid,
-                    deviceId: devUid,
-                    alertType: alertType,
-                    feedback: s.feedback || 0,
-                    Counter: s.Counter || 0,
-                    OdorSensVal: s.OdorSensVal || 0,
-                    status: 'OPEN',
-                    createdAt: s.updatedAt || new Date()
-                });
-            }
-
-            const tasks = await Task.find().populate("staff", "name empId userId").sort({ createdAt: -1 }).lean();
-            for (const t of tasks) {
-                const devUid = t.device_uid || t.deviceId || '';
-                if (!devUid) continue;
-                const existing = alerts.find(a => (a.device_uid || '').toLowerCase() === devUid.toLowerCase());
-                if (!existing) {
-                    alerts.push({
-                        _id: t._id,
-                        device_uid: devUid,
-                        deviceId: devUid,
-                        alertType: t.title || 'TASK_ASSIGNED',
-                        feedback: 3,
-                        status: (t.status === 'VERIFIED' || t.status === 'COMPLETED' || t.status === 'RESOLVED') ? 'RESOLVED' : 'OPEN',
-                        createdAt: t.createdAt || new Date()
-                    });
-                }
-            }
-        }
-
-        // Bulk fetch all tasks in ONE query to eliminate N+1 query waterfall (fixes 60s timeout)
+        // Bulk fetch all tasks
         const allTasks = await Task.find().populate("staff", "name empId userId").sort({ createdAt: -1 }).lean();
+        
+        // Map tasks by alert ID and device UID
         const taskByAlertIdMap = new Map();
-        const taskByDeviceUidMap = new Map();
+        const tasksByDeviceUidMap = new Map();
 
         allTasks.forEach(t => {
             if (t.alert) taskByAlertIdMap.set(t.alert.toString(), t);
-            const devKey1 = (t.device_uid || '').toLowerCase();
-            const devKey2 = (t.deviceId || '').toLowerCase();
-            if (devKey1 && !taskByDeviceUidMap.has(devKey1)) taskByDeviceUidMap.set(devKey1, t);
-            if (devKey2 && !taskByDeviceUidMap.has(devKey2)) taskByDeviceUidMap.set(devKey2, t);
+            const devKey = (t.device_uid || t.deviceId || '').toLowerCase();
+            if (devKey) {
+                if (!tasksByDeviceUidMap.has(devKey)) tasksByDeviceUidMap.set(devKey, []);
+                tasksByDeviceUidMap.get(devKey).push(t);
+            }
         });
 
-        const seenActiveDevices = new Set();
-        const latestAlerts = [];
+        const mergedAlerts = [];
+        const processedTaskIds = new Set();
 
+        // 1. Process all existing Alert collection records
         for (let i = 0; i < alerts.length; i++) {
-            const alertItem = alerts[i];
+            const alertItem = { ...alerts[i] };
             const alertIdStr = alertItem._id ? alertItem._id.toString() : '';
             const devKey = (alertItem.device_uid || alertItem.deviceId || '').toLowerCase();
-            
-            let task = taskByAlertIdMap.get(alertIdStr) || (devKey ? taskByDeviceUidMap.get(devKey) : null);
+
+            // Find matching task by alert ID or by device UID
+            let task = taskByAlertIdMap.get(alertIdStr);
+            if (!task && devKey && tasksByDeviceUidMap.has(devKey)) {
+                const devTasks = tasksByDeviceUidMap.get(devKey);
+                task = devTasks.find(t => !processedTaskIds.has(t._id.toString())) || devTasks[0];
+            }
 
             if (task) {
+                processedTaskIds.add(task._id.toString());
                 alertItem.taskId = task._id;
                 alertItem.taskStatus = task.status;
-                alertItem.taskProgressPercent = (task.status === "VERIFIED" || task.status === "COMPLETED" || task.status === "RESOLVED") 
-                    ? 100 
-                    : (task.progressPercent || 0);
+                alertItem.taskProgressPercent = (task.status === "VERIFIED" || task.status === "COMPLETED" || task.status === "RESOLVED") ? 100 : (task.progressPercent || 0);
 
                 if (task.status === "VERIFIED" || task.status === "COMPLETED" || task.status === "RESOLVED") {
                     alertItem.status = "RESOLVED";
@@ -192,30 +150,79 @@ const getAlerts = async (req, res) => {
                 }
             }
 
-            // Deduplicate active/open alerts per device, but keep ALL resolved alerts so they populate the Resolved tab!
-            if (alertItem.status !== "RESOLVED") {
-                if (devKey && seenActiveDevices.has(devKey)) {
-                    continue;
-                }
-                if (devKey) seenActiveDevices.add(devKey);
-            }
-
             const devInfo = deviceMap[devKey];
             if (devInfo) {
                 alertItem.deviceId = devInfo.deviceId || alertItem.device_uid;
                 alertItem.deviceLocation = `${devInfo.location || ''}${devInfo.floor ? ' - Floor ' + devInfo.floor : ''}`;
             } else {
-                alertItem.deviceId = alertItem.device_uid;
-                alertItem.deviceLocation = alertItem.device_uid;
+                alertItem.deviceId = alertItem.device_uid || 'Device';
+                alertItem.deviceLocation = alertItem.device_uid || 'Location';
             }
 
-            latestAlerts.push(alertItem);
+            mergedAlerts.push(alertItem);
         }
+
+        // 2. Ensure ALL remaining tasks (not linked to an Alert record) are also included so NO task ever vanishes!
+        for (let i = 0; i < allTasks.length; i++) {
+            const task = allTasks[i];
+            const taskIdStr = task._id.toString();
+            if (processedTaskIds.has(taskIdStr)) continue;
+
+            const devKey = (task.device_uid || task.deviceId || '').toLowerCase();
+            const devInfo = deviceMap[devKey];
+
+            let photos = [];
+            if (Array.isArray(task.cleaningPhotos) && task.cleaningPhotos.length > 0) {
+                photos = task.cleaningPhotos.map(p => typeof p === "string" ? p : (p.url || p.path || ""));
+            }
+            if (photos.length === 0) {
+                if (task.beforeCleaningPhoto) photos.push(task.beforeCleaningPhoto);
+                if (task.afterCleaningPhoto) photos.push(task.afterCleaningPhoto);
+            }
+
+            const isResolved = task.status === "VERIFIED" || task.status === "COMPLETED" || task.status === "RESOLVED";
+
+            const syntheticAlert = {
+                _id: task._id,
+                taskId: task._id,
+                device_uid: task.device_uid || task.deviceId || (devInfo ? devInfo.device_uid : ''),
+                deviceId: devInfo ? devInfo.deviceId : (task.deviceId || task.device_uid || ''),
+                deviceLocation: devInfo ? `${devInfo.location || ''}${devInfo.floor ? ' - Floor ' + devInfo.floor : ''}` : (task.device_uid || ''),
+                alertType: task.title || 'TASK_ASSIGNED',
+                feedback: 3,
+                status: isResolved ? 'RESOLVED' : 'OPEN',
+                taskStatus: task.status,
+                taskProgressPercent: isResolved ? 100 : (task.progressPercent || 0),
+                taskCleaningPhotos: photos.filter(Boolean),
+                assignedAt: task.assignedAt || task.createdAt,
+                startedAt: task.startedAt,
+                photosUploadedAt: task.photosUploadedAt,
+                submittedAt: task.submittedAt,
+                completedAt: task.completedAt,
+                verifiedAt: task.verifiedAt,
+                createdAt: task.createdAt || new Date(),
+                assignedStaffName: task.staff ? task.staff.name : '',
+                assignedStaffEmpId: task.staff ? (task.staff.empId || task.staff.userId || '') : ''
+            };
+
+            // Exclude resolved tasks older than 15 days
+            if (syntheticAlert.status === "RESOLVED") {
+                const resolvedDate = syntheticAlert.verifiedAt || syntheticAlert.completedAt || syntheticAlert.createdAt;
+                if (resolvedDate && new Date(resolvedDate) < fifteenDaysAgo) {
+                    continue;
+                }
+            }
+
+            mergedAlerts.push(syntheticAlert);
+        }
+
+        // Sort all merged alerts/tasks by createdAt descending
+        mergedAlerts.sort((a, b) => new Date(b.createdAt || b.assignedAt) - new Date(a.createdAt || a.assignedAt));
 
         res.status(200).json({
             success: true,
-            count: latestAlerts.length,
-            alerts: latestAlerts
+            count: mergedAlerts.length,
+            alerts: mergedAlerts
         });
 
     } catch (error) {
