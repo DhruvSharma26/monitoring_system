@@ -4,6 +4,25 @@ const SensorData = require("../models/SensorData");
 const User = require("../models/User");
 const Task = require("../models/Task");
 
+const getObjectCreationTime = (obj) => {
+    if (!obj) return 0;
+    if (obj.createdAt) return new Date(obj.createdAt).getTime();
+    if (obj.assignedAt) return new Date(obj.assignedAt).getTime();
+    if (obj.timestamp) return new Date(obj.timestamp).getTime();
+    
+    const id = obj._id || obj.id;
+    if (id) {
+        if (typeof id.getTimestamp === 'function') {
+            return id.getTimestamp().getTime();
+        }
+        const idStr = id.toString();
+        if (idStr.length === 24) {
+            return parseInt(idStr.substring(0, 8), 16) * 1000;
+        }
+    }
+    return 0;
+};
+
 const getAlerts = async (req, res) => {
 
     try {
@@ -27,12 +46,15 @@ const getAlerts = async (req, res) => {
         // Filter alerts by user role (admin devices vs staff assigned devices)
         let myDevices = [];
         let staffUserObj = null;
+        let staffCreationTime = 0;
 
         if (req.user && req.user.role === 'staff') {
             staffUserObj = await User.findById(req.user.id);
             if (!staffUserObj) {
                 return res.status(200).json({ success: true, count: 0, alerts: [] });
             }
+
+            staffCreationTime = getObjectCreationTime(staffUserObj);
 
             const assignedDevId = staffUserObj.assignedDevice;
             const devConditions = [
@@ -53,8 +75,8 @@ const getAlerts = async (req, res) => {
             }
 
             // Filter alerts created ONLY after staff member registration timestamp!
-            if (staffUserObj.createdAt) {
-                query.createdAt = { $gte: new Date(staffUserObj.createdAt) };
+            if (staffCreationTime > 0) {
+                query.createdAt = { $gte: new Date(staffCreationTime) };
             }
         } else {
             const adminDevices = await Device.find({ adminId: req.user.id }).select("device_uid deviceId location floor").lean();
@@ -236,6 +258,14 @@ const getAlerts = async (req, res) => {
 
         let finalAlerts = mergedAlerts;
         if (req.user && req.user.role === 'staff' && staffUserObj) {
+            const staffDeviceUidsSet = new Set(
+                myDevices.flatMap(d => [
+                    d.device_uid ? d.device_uid.toLowerCase() : null,
+                    d.deviceId ? d.deviceId.toLowerCase() : null,
+                    d._id ? d._id.toString().toLowerCase() : null
+                ].filter(Boolean))
+            );
+
             finalAlerts = mergedAlerts.filter(alertItem => {
                 const isResolved = alertItem.status === "RESOLVED" || alertItem.taskStatus === "VERIFIED" || alertItem.taskStatus === "COMPLETED" || alertItem.taskStatus === "RESOLVED";
 
@@ -244,11 +274,18 @@ const getAlerts = async (req, res) => {
                     return false;
                 }
 
-                // Verify alert creation timestamp is strictly after staff creation timestamp
-                if (staffUserObj.createdAt && alertItem.createdAt) {
-                    if (new Date(alertItem.createdAt) < new Date(staffUserObj.createdAt)) {
-                        return false;
-                    }
+                // Verify device match
+                const devKey1 = (alertItem.device_uid || "").toLowerCase();
+                const devKey2 = (alertItem.deviceId || "").toLowerCase();
+                const isDeviceMatched = (devKey1 && staffDeviceUidsSet.has(devKey1)) || (devKey2 && staffDeviceUidsSet.has(devKey2));
+                if (!isDeviceMatched) {
+                    return false;
+                }
+
+                // Verify alert creation timestamp is strictly AFTER staff creation timestamp!
+                const alertTime = getObjectCreationTime(alertItem);
+                if (staffCreationTime > 0 && alertTime > 0 && alertTime < staffCreationTime) {
+                    return false;
                 }
 
                 return true;
