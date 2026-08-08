@@ -349,8 +349,7 @@ const verifyTask = async (req, res) => {
 // Get My Tasks (Staff)
 const getMyTasks = async (req, res) => {
     try {
-        let staffIds = [];
-        let staffQueryId = req.user ? req.user.id : null;
+        let staffQueryId = req.user ? (req.user.id || req.user._id) : null;
         const requestedId = req.params.staffId || req.query.staffId;
         const targetId = requestedId || staffQueryId;
 
@@ -365,27 +364,33 @@ const getMyTasks = async (req, res) => {
                     { email: targetId }
                 ]
             });
+        }
 
-            if (staffObj) {
-                staffIds.push(staffObj._id);
-                if (staffObj.userId) staffIds.push(staffObj.userId);
-                if (staffObj.empId) staffIds.push(staffObj.empId);
-            } else if (isObjectId) {
-                staffIds.push(targetId);
-            }
+        const validStaffObjectIds = [];
+        if (staffObj) {
+            validStaffObjectIds.push(staffObj._id);
+        } else if (targetId && mongoose.Types.ObjectId.isValid(targetId)) {
+            validStaffObjectIds.push(new mongoose.Types.ObjectId(targetId));
+        }
+
+        const orConditions = [];
+
+        if (validStaffObjectIds.length > 0) {
+            orConditions.push({ staff: { $in: validStaffObjectIds } });
+        }
+
+        if (staffObj && staffObj.assignedDevice && mongoose.Types.ObjectId.isValid(staffObj.assignedDevice)) {
+            orConditions.push({ device: staffObj.assignedDevice });
         }
 
         let query = {};
-        if (staffIds.length > 0) {
-            query = {
-                $or: [
-                    { staff: { $in: staffIds } },
-                    { assignedStaff: { $in: staffIds } }
-                ]
-            };
-            if (staffObj && staffObj.assignedDevice) {
-                query.$or.push({ device: staffObj.assignedDevice });
-            }
+        if (orConditions.length > 0) {
+            query = { $or: orConditions };
+        } else {
+            return res.status(200).json({
+                success: true,
+                tasks: []
+            });
         }
 
         const tasks = await Task.find(query)
@@ -398,8 +403,8 @@ const getMyTasks = async (req, res) => {
             tasks
         });
     } catch (error) {
-        console.log(error);
-        res.status(500).json({ success: false, message: "Server Error" });
+        console.error("❌ Error in getMyTasks:", error);
+        res.status(500).json({ success: false, message: "Server Error", error: error.message });
     }
 };
 
