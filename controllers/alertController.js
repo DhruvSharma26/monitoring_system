@@ -43,16 +43,28 @@ const getAlerts = async (req, res) => {
                 $or: devConditions
             }).select("device_uid deviceId location floor").lean();
         } else {
-            myDevices = await Device.find({ adminId: req.user.id }).select("device_uid deviceId location floor").lean();
+            const adminDevices = await Device.find({ adminId: req.user.id }).select("device_uid deviceId location floor").lean();
+            if (adminDevices.length > 0) {
+                myDevices = adminDevices;
+            } else {
+                myDevices = await Device.find().select("device_uid deviceId location floor").lean();
+            }
         }
 
-        const myDeviceUids = myDevices.map(d => d.device_uid);
         const deviceMap = {};
         myDevices.forEach(d => {
-            deviceMap[d.device_uid] = d;
+            if (d.device_uid) deviceMap[d.device_uid.toLowerCase()] = d;
+            if (d.deviceId) deviceMap[d.deviceId.toLowerCase()] = d;
         });
 
-        query.device_uid = { $in: myDeviceUids };
+        const allDeviceUids = myDevices.flatMap(d => [d.device_uid, d.deviceId, d._id ? d._id.toString() : null].filter(Boolean));
+        if (allDeviceUids.length > 0) {
+            const regexUids = allDeviceUids.map(u => new RegExp(`^${u.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'));
+            query.$or = [
+                { device_uid: { $in: regexUids } },
+                { deviceId: { $in: regexUids } }
+            ];
+        }
 
         const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
         const alerts = await Alert.find(query).sort({ createdAt: -1 }).lean();
@@ -63,7 +75,14 @@ const getAlerts = async (req, res) => {
         for (let i = 0; i < alerts.length; i++) {
             const alertItem = alerts[i];
             
-            const task = await Task.findOne({ alert: alertItem._id }).populate("staff", "name empId userId");
+            let task = await Task.findOne({ alert: alertItem._id }).populate("staff", "name empId userId").lean();
+            if (!task && alertItem.device_uid) {
+                const devUidRegex = new RegExp(`^${alertItem.device_uid.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i');
+                task = await Task.findOne({
+                    $or: [{ device_uid: devUidRegex }, { deviceId: devUidRegex }]
+                }).populate("staff", "name empId userId").sort({ createdAt: -1 }).lean();
+            }
+
             if (task) {
                 alertItem.taskId = task._id;
                 alertItem.taskStatus = task.status;
@@ -95,6 +114,8 @@ const getAlerts = async (req, res) => {
                     alertItem.assignedStaffName = task.staff.name;
                     alertItem.assignedStaffEmpId = task.staff.empId || task.staff.userId || "";
                 }
+            } else if (!alertItem.taskCleaningPhotos) {
+                alertItem.taskCleaningPhotos = [];
             }
 
             // Exclude resolved alerts older than 15 days
@@ -107,13 +128,15 @@ const getAlerts = async (req, res) => {
 
             // Deduplicate active/open alerts per device, but keep ALL resolved alerts so they populate the Resolved tab!
             if (alertItem.status !== "RESOLVED") {
-                if (seenActiveDevices.has(alertItem.device_uid)) {
+                const devKey = (alertItem.device_uid || alertItem.deviceId || '').toLowerCase();
+                if (devKey && seenActiveDevices.has(devKey)) {
                     continue;
                 }
-                seenActiveDevices.add(alertItem.device_uid);
+                if (devKey) seenActiveDevices.add(devKey);
             }
 
-            const devInfo = deviceMap[alertItem.device_uid];
+            const devKey = (alertItem.device_uid || alertItem.deviceId || '').toLowerCase();
+            const devInfo = deviceMap[devKey];
             if (devInfo) {
                 alertItem.deviceId = devInfo.deviceId || alertItem.device_uid;
                 alertItem.deviceLocation = `${devInfo.location || ''}${devInfo.floor ? ' - Floor ' + devInfo.floor : ''}`;
