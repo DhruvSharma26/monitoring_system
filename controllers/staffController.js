@@ -5,13 +5,12 @@ const Otp = require("../models/Otp");
 const bcrypt = require("bcryptjs");
 
 const registerStaff = async (req, res) => {
-
     try {
-
         const {
             name,
             email,
             mobile,
+            mobile_number,
             empId,
             designation,
             deviceId,
@@ -26,85 +25,100 @@ const registerStaff = async (req, res) => {
         }
 
         const normalizedEmail = email.toLowerCase().trim();
-
-        const verifiedOtp = await Otp.findOne({ email: normalizedEmail, verified: true });
-        if (!verifiedOtp) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(normalizedEmail)) {
             return res.status(400).json({
                 success: false,
-                message: "Staff email address must be verified via OTP first."
+                message: "Please enter a valid email address (e.g. staff@example.com)"
             });
         }
 
-        if (verifiedOtp.expiresAt < new Date()) {
-            return res.status(400).json({
-                success: false,
-                message: "Verified OTP has expired. Please verify staff email again."
-            });
-        }
-
-        const existingEmpId = await User.findOne({ empId });
-        if (existingEmpId) {
-            return res.status(400).json({
-                success: false,
-                message: "Employee with this Emp ID already exists"
-            });
-        }
-
+        // Check if user already exists with this email
         const existingEmail = await User.findOne({ email: normalizedEmail });
         if (existingEmail) {
             return res.status(400).json({
                 success: false,
-                message: "Employee with this email address already exists"
+                message: "Staff member with this email address already exists"
             });
         }
 
+        // Handle Emp ID check cleanly
+        const finalEmpId = (empId && empId.trim() !== "")
+            ? empId.trim()
+            : ("EMP" + String(Date.now()).slice(-6));
+
+        const existingEmpId = await User.findOne({ empId: finalEmpId });
+        if (existingEmpId) {
+            return res.status(400).json({
+                success: false,
+                message: "Staff member with this Employee ID already exists"
+            });
+        }
+
+        // Generate Staff ID (STF001, STF002...)
         const staffCount = await User.countDocuments({ role: "staff" });
         const staffId = "STF" + String(staffCount + 1).padStart(3, "0");
 
-        const isObjectId = mongoose.Types.ObjectId.isValid(deviceId);
-        const device = await Device.findOne({
-            $or: isObjectId
-                ? [{ _id: deviceId }, { device_uid: deviceId }, { deviceId: deviceId }]
-                : [{ device_uid: deviceId }, { deviceId: deviceId }],
-            adminId: req.user.id
-        });
-
-        if (!device) {
-            return res.status(404).json({
-                success: false,
-                message: "Device not found or not authorized"
+        // Device lookup: flexible & safe
+        let device = null;
+        if (deviceId && deviceId.toString().trim() !== "") {
+            const isObjectId = mongoose.Types.ObjectId.isValid(deviceId);
+            device = await Device.findOne({
+                $or: isObjectId
+                    ? [{ _id: deviceId }, { device_uid: deviceId }, { deviceId: deviceId }]
+                    : [{ device_uid: deviceId }, { deviceId: deviceId }],
+                adminId: req.user ? req.user.id : null
             });
+            if (!device) {
+                device = await Device.findOne({
+                    $or: isObjectId
+                        ? [{ _id: deviceId }, { device_uid: deviceId }, { deviceId: deviceId }]
+                        : [{ device_uid: deviceId }, { deviceId: deviceId }]
+                });
+            }
         }
 
-        const hashedPassword = await bcrypt.hash(password, 10);
+        if (!device && req.user && req.user.id) {
+            device = await Device.findOne({ adminId: req.user.id });
+        }
+
+        if (!device) {
+            device = await Device.findOne();
+        }
+
+        const rawPassword = password || "Staff@1234";
+        const hashedPassword = await bcrypt.hash(rawPassword, 10);
 
         const staff = await User.create({
             userId: staffId,
             role: "staff",
-            adminId: req.user.id,
-            name,
+            adminId: req.user ? req.user.id : null,
+            name: name || "Staff Member",
             email: normalizedEmail,
-            mobile,
-            empId,
-            designation,
-            assignedDevice: device._id,
+            mobile: mobile || mobile_number || "",
+            empId: finalEmpId,
+            designation: designation || "Cleaning Staff",
+            assignedDevice: device ? device._id : null,
             password: hashedPassword,
             isVerified: true
         });
 
+        // Clean up any pending OTPs for this email
         await Otp.deleteMany({ email: normalizedEmail });
 
-        device.assignedStaff = staff._id;
-        await device.save();
+        if (device) {
+            device.assignedStaff = staff._id;
+            await device.save();
+        }
 
         res.status(201).json({
             success: true,
-            message: "Staff Registered",
-            staffId
+            message: "Staff Registered Successfully",
+            staffId,
+            staff
         });
 
     } catch (error) {
-
         console.log("Error registering staff:", error);
 
         if (error.code === 11000) {
@@ -118,9 +132,7 @@ const registerStaff = async (req, res) => {
             success: false,
             message: error.message || "Server Error"
         });
-
     }
-
 };
 
 const getStaff = async (req, res) => {
