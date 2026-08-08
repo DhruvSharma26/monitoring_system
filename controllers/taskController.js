@@ -268,6 +268,7 @@ const verifyTask = async (req, res) => {
         task.adminRemarks = remarks;
         task.verifiedAt = now;
         task.completedAt = task.completedAt || now;
+        task.resolvedAt = task.resolvedAt || now;
         task.progressPercent = 100;
 
         task.timeline.push({
@@ -279,10 +280,10 @@ const verifyTask = async (req, res) => {
 
         await task.save();
 
-        // Mark associated Alert as RESOLVED in DB
+        // Mark associated Alert as RESOLVED in DB with resolvedAt timestamp
         if (task.alert) {
             const Alert = require("../models/Alert");
-            await Alert.findByIdAndUpdate(task.alert, { status: "RESOLVED" });
+            await Alert.findByIdAndUpdate(task.alert, { status: "RESOLVED", resolvedAt: now });
         }
 
         broadcastTaskUpdate(task);
