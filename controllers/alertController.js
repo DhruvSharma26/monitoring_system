@@ -26,12 +26,17 @@ const getAlerts = async (req, res) => {
 
         // Filter alerts by user role (admin devices vs staff assigned devices)
         let myDevices = [];
+        let staffUserObj = null;
+
         if (req.user && req.user.role === 'staff') {
-            const staffUser = await User.findById(req.user.id);
-            const assignedDevId = staffUser ? staffUser.assignedDevice : null;
-            
+            staffUserObj = await User.findById(req.user.id);
+            if (!staffUserObj) {
+                return res.status(200).json({ success: true, count: 0, alerts: [] });
+            }
+
+            const assignedDevId = staffUserObj.assignedDevice;
             const devConditions = [
-                { assignedStaff: req.user.id }
+                { assignedStaff: staffUserObj._id }
             ];
             if (assignedDevId) {
                 devConditions.push({ _id: assignedDevId });
@@ -42,6 +47,15 @@ const getAlerts = async (req, res) => {
             myDevices = await Device.find({
                 $or: devConditions
             }).select("device_uid deviceId location floor").lean();
+
+            if (myDevices.length === 0) {
+                return res.status(200).json({ success: true, count: 0, alerts: [] });
+            }
+
+            // Filter alerts created ONLY after staff member registration timestamp!
+            if (staffUserObj.createdAt) {
+                query.createdAt = { $gte: new Date(staffUserObj.createdAt) };
+            }
         } else {
             const adminDevices = await Device.find({ adminId: req.user.id }).select("device_uid deviceId location floor").lean();
             if (adminDevices.length > 0) {
@@ -136,6 +150,7 @@ const getAlerts = async (req, res) => {
                 alertItem.completedAt = task.completedAt;
                 alertItem.verifiedAt = task.verifiedAt;
                 if (task.staff) {
+                    alertItem.staffId = task.staff._id ? task.staff._id.toString() : task.staff.toString();
                     alertItem.assignedStaffName = task.staff.name;
                     alertItem.assignedStaffEmpId = task.staff.empId || task.staff.userId || "";
                 }
@@ -203,6 +218,7 @@ const getAlerts = async (req, res) => {
                 verifiedAt: task.verifiedAt,
                 resolvedAt: task.resolvedAt || task.verifiedAt || task.completedAt,
                 createdAt: task.createdAt || new Date(),
+                staffId: task.staff ? (task.staff._id ? task.staff._id.toString() : task.staff.toString()) : '',
                 assignedStaffName: task.staff ? task.staff.name : '',
                 assignedStaffEmpId: task.staff ? (task.staff.empId || task.staff.userId || '') : ''
             };
@@ -218,13 +234,38 @@ const getAlerts = async (req, res) => {
             mergedAlerts.push(syntheticAlert);
         }
 
+        let finalAlerts = mergedAlerts;
+        if (req.user && req.user.role === 'staff' && staffUserObj) {
+            const staffIdStr = staffUserObj._id.toString();
+            const staffEmpId = (staffUserObj.empId || "").trim().toLowerCase();
+            const staffUserId = (staffUserObj.userId || "").trim().toLowerCase();
+
+            finalAlerts = mergedAlerts.filter(alertItem => {
+                const isResolved = alertItem.status === "RESOLVED" || alertItem.taskStatus === "VERIFIED" || alertItem.taskStatus === "COMPLETED" || alertItem.taskStatus === "RESOLVED";
+
+                if (isResolved) {
+                    const itemStaffId = (alertItem.staffId || "").toString();
+                    const itemEmpId = (alertItem.assignedStaffEmpId || "").trim().toLowerCase();
+
+                    const matchesThisStaff =
+                        (itemStaffId && itemStaffId === staffIdStr) ||
+                        (staffEmpId && itemEmpId === staffEmpId) ||
+                        (staffUserId && itemEmpId === staffUserId);
+
+                    return matchesThisStaff;
+                }
+
+                return true;
+            });
+        }
+
         // Sort all merged alerts/tasks by createdAt descending
-        mergedAlerts.sort((a, b) => new Date(b.createdAt || b.assignedAt) - new Date(a.createdAt || a.assignedAt));
+        finalAlerts.sort((a, b) => new Date(b.createdAt || b.assignedAt) - new Date(a.createdAt || a.assignedAt));
 
         res.status(200).json({
             success: true,
-            count: mergedAlerts.length,
-            alerts: mergedAlerts
+            count: finalAlerts.length,
+            alerts: finalAlerts
         });
 
     } catch (error) {
