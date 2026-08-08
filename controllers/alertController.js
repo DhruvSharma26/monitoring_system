@@ -126,19 +126,28 @@ const getAlerts = async (req, res) => {
             }
         }
 
+        // Bulk fetch all tasks in ONE query to eliminate N+1 query waterfall (fixes 60s timeout)
+        const allTasks = await Task.find().populate("staff", "name empId userId").sort({ createdAt: -1 }).lean();
+        const taskByAlertIdMap = new Map();
+        const taskByDeviceUidMap = new Map();
+
+        allTasks.forEach(t => {
+            if (t.alert) taskByAlertIdMap.set(t.alert.toString(), t);
+            const devKey1 = (t.device_uid || '').toLowerCase();
+            const devKey2 = (t.deviceId || '').toLowerCase();
+            if (devKey1 && !taskByDeviceUidMap.has(devKey1)) taskByDeviceUidMap.set(devKey1, t);
+            if (devKey2 && !taskByDeviceUidMap.has(devKey2)) taskByDeviceUidMap.set(devKey2, t);
+        });
+
         const seenActiveDevices = new Set();
         const latestAlerts = [];
 
         for (let i = 0; i < alerts.length; i++) {
             const alertItem = alerts[i];
+            const alertIdStr = alertItem._id ? alertItem._id.toString() : '';
+            const devKey = (alertItem.device_uid || alertItem.deviceId || '').toLowerCase();
             
-            let task = await Task.findOne({ alert: alertItem._id }).populate("staff", "name empId userId").lean();
-            if (!task && alertItem.device_uid) {
-                const devUidRegex = new RegExp(`^${alertItem.device_uid.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i');
-                task = await Task.findOne({
-                    $or: [{ device_uid: devUidRegex }, { deviceId: devUidRegex }]
-                }).populate("staff", "name empId userId").sort({ createdAt: -1 }).lean();
-            }
+            let task = taskByAlertIdMap.get(alertIdStr) || (devKey ? taskByDeviceUidMap.get(devKey) : null);
 
             if (task) {
                 alertItem.taskId = task._id;
