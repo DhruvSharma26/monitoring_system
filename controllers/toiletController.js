@@ -1,7 +1,7 @@
+const mongoose = require("mongoose");
 const Device = require("../models/Device");
 const SensorData = require("../models/SensorData");
-const LatestDeviceStatus =
-require("../models/LatestDeviceStatus");
+const LatestDeviceStatus = require("../models/LatestDeviceStatus");
 const User = require("../models/User");
 const Alert = require("../models/Alert");
 const Task = require("../models/Task");
