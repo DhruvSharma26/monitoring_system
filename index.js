@@ -117,8 +117,16 @@ app.use(
 app.use("/api/otp", otpRoutes);
 app.use("/api/notifications", notificationRoutes);
 
-app.get("/", (req, res) => {
-  res.send("Toilet Monitoring Backend Running");
+app.get(["/", "/health", "/api/health"], (req, res) => {
+  const mongoose = require("mongoose");
+  const dbStatus = mongoose.connection.readyState === 1 ? "CONNECTED" : "DISCONNECTED";
+  const statusCode = dbStatus === "CONNECTED" ? 200 : 503;
+  res.status(statusCode).json({
+    status: dbStatus === "CONNECTED" ? "healthy" : "unhealthy",
+    service: "Toilet Monitoring API",
+    database: dbStatus,
+    timestamp: new Date().toISOString()
+  });
 });
 
 app.use(errorHandler);
