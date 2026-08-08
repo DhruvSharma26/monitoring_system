@@ -55,9 +55,13 @@ const registerStaff = async (req, res) => {
             });
         }
 
-        // Generate Staff ID (STF001, STF002...)
-        const staffCount = await User.countDocuments({ role: "staff" });
-        const staffId = "STF" + String(staffCount + 1).padStart(3, "0");
+        // Generate Staff System ID (STF001, STF002...) - Uniquely Mapped
+        let staffCount = await User.countDocuments({ role: "staff" });
+        let staffId = "STF" + String(staffCount + 1).padStart(3, "0");
+        while (await User.findOne({ userId: staffId })) {
+            staffCount++;
+            staffId = "STF" + String(staffCount + 1).padStart(3, "0");
+        }
 
         // Device lookup: flexible & safe
         let device = null;

@@ -447,13 +447,13 @@ const assignAlert = async (req, res) => {
         }
         if (!staff) {
             staff = await User.findOne({ 
-                $or: [{ userId: staff_id }, { empId: staff_id }, { email: staff_id }], 
+                $or: [{ userId: staff_id }, { email: staff_id }], 
                 role: "staff" 
             });
         }
         if (!staff) {
             staff = await User.findOne({ 
-                $or: [{ _id: isObjectId ? staff_id : null }, { userId: staff_id }, { empId: staff_id }, { email: staff_id }]
+                $or: [{ _id: isObjectId ? staff_id : null }, { userId: staff_id }, { email: staff_id }]
             });
         }
         if (!staff) return res.status(404).json({ success: false, message: "Staff member not found" });

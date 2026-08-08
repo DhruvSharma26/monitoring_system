@@ -38,13 +38,13 @@ const assignTask = async (req, res) => {
         }
         if (!staff) {
             staff = await User.findOne({
-                $or: [{ userId: staffId }, { empId: staffId }, { email: staffId }],
+                $or: [{ userId: staffId }, { email: staffId }],
                 role: "staff"
             });
         }
         if (!staff) {
             staff = await User.findOne({
-                $or: [{ _id: isObjectId ? staffId : null }, { userId: staffId }, { empId: staffId }, { email: staffId }]
+                $or: [{ _id: isObjectId ? staffId : null }, { userId: staffId }, { email: staffId }]
             });
         }
 
@@ -360,7 +360,6 @@ const getMyTasks = async (req, res) => {
                 $or: [
                     ...(isObjectId ? [{ _id: targetId }] : []),
                     { userId: targetId },
-                    { empId: targetId },
                     { email: targetId }
                 ]
             });
