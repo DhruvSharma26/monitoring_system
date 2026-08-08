@@ -380,11 +380,11 @@ const getMyTasks = async (req, res) => {
         }
 
         if (staffObj) {
-            const staffDeviceQueries = [
-                { assignedStaff: staffObj._id },
-                { assignedStaff: staffObj.userId },
-                { assignedStaff: staffObj.empId }
-            ].filter(q => Object.values(q)[0]);
+            const staffDeviceQueries = [];
+
+            if (staffObj._id && mongoose.Types.ObjectId.isValid(staffObj._id)) {
+                staffDeviceQueries.push({ assignedStaff: staffObj._id });
+            }
 
             if (staffObj.assignedDevice) {
                 const isDevObjId = mongoose.Types.ObjectId.isValid(staffObj.assignedDevice);
