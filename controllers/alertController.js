@@ -194,14 +194,12 @@ const getAlerts = async (req, res) => {
 
             // Deduplicate active/open alerts per device, but keep ALL resolved alerts so they populate the Resolved tab!
             if (alertItem.status !== "RESOLVED") {
-                const devKey = (alertItem.device_uid || alertItem.deviceId || '').toLowerCase();
                 if (devKey && seenActiveDevices.has(devKey)) {
                     continue;
                 }
                 if (devKey) seenActiveDevices.add(devKey);
             }
 
-            const devKey = (alertItem.device_uid || alertItem.deviceId || '').toLowerCase();
             const devInfo = deviceMap[devKey];
             if (devInfo) {
                 alertItem.deviceId = devInfo.deviceId || alertItem.device_uid;
