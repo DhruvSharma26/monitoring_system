@@ -7,7 +7,8 @@ const {
     login,
     refresh,
     logout,
-    getMe
+    getMe,
+    updateProfile
 } = require("../controllers/authController");
 const authMiddleware = require("../middleware/authMiddleware");
 const { authLimiter } = require("../middleware/rateLimiter");
@@ -42,6 +43,12 @@ router.get(
     "/me",
     authMiddleware,
     getMe
+);
+
+router.put(
+    "/profile",
+    authMiddleware,
+    updateProfile
 );
 
 module.exports = router;

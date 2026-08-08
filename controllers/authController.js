@@ -284,10 +284,46 @@ const getMe = async (req, res, next) => {
     }
 };
 
+const updateProfile = async (req, res, next) => {
+    try {
+        const {
+            companyName,
+            contactPerson,
+            designation,
+            mobile,
+            alternateNumber,
+            country
+        } = req.body;
+
+        const user = await User.findById(req.user.id);
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
+        if (companyName !== undefined) user.companyName = companyName;
+        if (contactPerson !== undefined) user.contactPerson = contactPerson;
+        if (designation !== undefined) user.designation = designation;
+        if (mobile !== undefined) user.mobile = mobile;
+        if (alternateNumber !== undefined) user.alternateNumber = alternateNumber;
+        if (country !== undefined) user.country = country;
+
+        await user.save();
+
+        res.status(200).json({
+            success: true,
+            message: "Profile updated successfully",
+            user
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     registerAdmin,
     login,
     refresh,
     logout,
-    getMe
+    getMe,
+    updateProfile
 };
