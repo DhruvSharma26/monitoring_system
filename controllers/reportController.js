@@ -169,7 +169,8 @@ const getAdminDeviceScope = async (userObj) => {
 
 // Helper to calculate daily telemetry breakdown from real sensor logs
 const calculateDailyBreakdown = (sensorLogs, fromDate, tillDate, statusObj) => {
-    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const dayNamesShort = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const dayNamesFull = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     const history = [];
     const daysDiff = Math.max(1, Math.min(60, Math.ceil((tillDate - fromDate) / (1000 * 60 * 60 * 24))));
 
@@ -177,7 +178,8 @@ const calculateDailyBreakdown = (sensorLogs, fromDate, tillDate, statusObj) => {
         const d = new Date(tillDate.getTime());
         d.setDate(d.getDate() - i);
         const dateStr = d.toISOString().split("T")[0];
-        const dayLabel = dayNames[d.getDay()];
+        const dayLabel = dayNamesShort[d.getDay()];
+        const dayFullLabel = dayNamesFull[d.getDay()];
 
         const dayLogs = sensorLogs.filter(log => {
             const logDate = new Date(log.timestamp).toISOString().split("T")[0];
@@ -185,9 +187,18 @@ const calculateDailyBreakdown = (sensorLogs, fromDate, tillDate, statusObj) => {
         });
 
         if (dayLogs.length > 0) {
-            const sumRating = dayLogs.reduce((acc, l) => acc + feedbackToRating(l.feedback), 0);
-            const dayRating = parseFloat((sumRating / dayLogs.length).toFixed(1));
-            const sumOdor = dayLogs.reduce((acc, l) => acc + (l.OdorSensVal || 0), 0);
+            const explicit = dayLogs.filter(l => l.feedback !== undefined && l.feedback !== null && Number(l.feedback) > 0);
+            let dayRating = 5.0;
+            if (explicit.length > 0) {
+                const sum = explicit.reduce((acc, l) => acc + feedbackToRating(Number(l.feedback)), 0);
+                dayRating = parseFloat((sum / explicit.length).toFixed(1));
+            } else {
+                const highOdor = dayLogs.some(l => (Number(l.OdorSensVal) || 0) >= 80);
+                const warningOdor = dayLogs.some(l => (Number(l.OdorSensVal) || 0) >= 50);
+                dayRating = highOdor ? 1.0 : (warningOdor ? 2.5 : 5.0);
+            }
+
+            const sumOdor = dayLogs.reduce((acc, l) => acc + (Number(l.OdorSensVal) || 0), 0);
             const dayOdor = Math.round(sumOdor / dayLogs.length);
             let dayCounter = 0;
             for (const l of dayLogs) {
@@ -198,11 +209,22 @@ const calculateDailyBreakdown = (sensorLogs, fromDate, tillDate, statusObj) => {
 
             history.push({
                 day: dayLabel,
+                dayFull: dayFullLabel,
                 date: dateStr,
                 rating: dayRating,
                 odor: dayOdor,
                 counter: dayCounter,
                 totalFeedback: dayFeedbackCount
+            });
+        } else {
+            history.push({
+                day: dayLabel,
+                dayFull: dayFullLabel,
+                date: dateStr,
+                rating: statusObj?.feedback ? feedbackToRating(statusObj.feedback) : 5.0,
+                odor: Number(statusObj?.OdorSensVal) || 0,
+                counter: Number(statusObj?.Counter) || 0,
+                totalFeedback: 0
             });
         }
     }
@@ -680,6 +702,15 @@ const downloadReportPdf = async (req, res) => {
         if (incOdor !== "false") doc.fillColor("#333333").fontSize(11).text(`• Average Odor Level (Last 1 Week): ${metrics.averageOdor7Days} PPM`);
         if (incCounter !== "false") doc.fillColor("#333333").fontSize(11).text(`• Total Visitor Usage Counter (Last 1 Week): ${metrics.totalUsage7Days} Entries`);
 
+        doc.moveDown(0.5);
+        doc.fillColor("#333333").fontSize(11).text("• Last 1 Week Daywise Breakdown:");
+        const historyListPdf = calculateDailyBreakdown(sensorLogs, fromDate, tillDate, statusObj);
+        for (const item of historyListPdf) {
+            doc.fillColor("#555555").fontSize(10).text(
+                `   - ${item.dayFull || item.day} (${item.date}): Avg Rating: ${item.rating} / 5.0 | Avg Odor: ${item.odor} PPM | Visitor Counter: ${item.counter}`
+            );
+        }
+
         if (incStaff !== "false") {
             doc.moveDown();
             doc.fillColor("#0066FF").fontSize(14).text("STAFF CLEANING AUDIT TRAIL");
@@ -713,19 +744,6 @@ const downloadReportPdf = async (req, res) => {
                     );
                     doc.moveDown(0.2);
                 }
-            }
-        }
-
-        if (incHistory !== "false") {
-            doc.moveDown();
-            doc.fillColor("#0066FF").fontSize(14).text("PERIOD HISTORICAL PERFORMANCE BREAKDOWN");
-            doc.moveDown(0.5);
-
-            const historyList = calculateDailyBreakdown(sensorLogs, fromDate, tillDate, statusObj);
-            for (const item of historyList) {
-                doc.fillColor("#444444").fontSize(10).text(
-                    `${item.date} (${item.day}) - Avg Rating: ${item.rating} / 5.0 | Avg Odor: ${item.odor} PPM | Usages: ${item.counter} | Feedbacks: ${item.totalFeedback}`
-                );
             }
         }
 
@@ -812,22 +830,18 @@ const downloadReportCsv = async (req, res) => {
         if (incOdor !== "false") buffer.push(`Average Odor Level (Last 24 Hours),${metrics.averageOdor24h} PPM`);
         if (incCounter !== "false") buffer.push(`Total Usage Counter (Last 24 Hours),${metrics.totalUsage24h}`);
         buffer.push("");
-        buffer.push("--- LAST 1 WEEK (7 DAYS) METRICS ---");
+        buffer.push("--- LAST 1 WEEK (7 DAYS) METRICS & DAYWISE BREAKDOWN ---");
         if (incRating !== "false") buffer.push(`Average Rating (Last 1 Week),${metrics.averageRating7Days} / 5.0`);
         if (incOdor !== "false") buffer.push(`Average Odor Level (Last 1 Week),${metrics.averageOdor7Days} PPM`);
         if (incCounter !== "false") buffer.push(`Total Usage Counter (Last 1 Week),${metrics.totalUsage7Days}`);
         if (incStaff !== "false") buffer.push(`Last Cleaned,"${lastCleaned}"`);
         if (incStaff !== "false") buffer.push(`Cleaned By Staff,"${staffName} (${staffId})"`);
 
-        if (incHistory !== "false") {
-            buffer.push("");
-            buffer.push("PERIOD HISTORICAL BREAKDOWN");
-            buffer.push("Date,Day,Average Rating,Average Odor (PPM),Usage Counter,Feedbacks");
-
-            const historyList = calculateDailyBreakdown(sensorLogs, fromDate, tillDate, statusObj);
-            for (const item of historyList) {
-                buffer.push(`${item.date},${item.day},${item.rating},${item.odor},${item.counter},${item.totalFeedback}`);
-            }
+        buffer.push("");
+        buffer.push("Day,Date,Average Rating,Average Odor (PPM),Visitor Usage Counter,Total Feedbacks");
+        const historyListCsv = calculateDailyBreakdown(sensorLogs, fromDate, tillDate, statusObj);
+        for (const item of historyListCsv) {
+            buffer.push(`"${item.dayFull || item.day}",${item.date},${item.rating} / 5.0,${item.odor} PPM,${item.counter},${item.totalFeedback}`);
         }
 
         res.send(buffer.join("\n"));
