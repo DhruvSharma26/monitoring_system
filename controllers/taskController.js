@@ -88,6 +88,8 @@ const assignTask = async (req, res) => {
         if (device) {
             device.assignedStaff = staff._id;
             await device.save();
+            staff.assignedDevice = device._id;
+            await staff.save();
         }
 
         try {
@@ -398,6 +400,44 @@ const getMyTasks = async (req, res) => {
                 const matchedDevices = await Device.find({ $or: staffDeviceQueries }).select("_id").lean();
                 for (const dev of matchedDevices) {
                     orConditions.push({ device: dev._id });
+                }
+            }
+
+            // Auto-create an initial active task if staff is assigned to a device but has 0 tasks
+            const existingTaskCount = await Task.countDocuments({
+                $or: [
+                    { staff: staffObj._id },
+                    ...(staffObj.assignedDevice ? [{ device: staffObj.assignedDevice }] : [])
+                ]
+            });
+
+            if (existingTaskCount === 0) {
+                let devToAssign = null;
+                if (staffObj.assignedDevice) {
+                    devToAssign = await Device.findById(staffObj.assignedDevice);
+                }
+                if (!devToAssign) {
+                    devToAssign = await Device.findOne({ assignedStaff: staffObj._id });
+                }
+
+                if (devToAssign) {
+                    const now = new Date();
+                    const autoTask = await Task.create({
+                        taskName: `Hygiene & Sanitation — ${devToAssign.location || devToAssign.deviceId || 'Restroom'}`,
+                        staff: staffObj._id,
+                        device: devToAssign._id,
+                        assignedAt: now,
+                        status: "ASSIGNED",
+                        priority: "high",
+                        notes: "Initial Cleaning Task for Assigned Device",
+                        timeline: [{
+                            status: "ASSIGNED",
+                            timestamp: now,
+                            notes: "Task auto-created for assigned device"
+                        }]
+                    });
+                    console.log(`✨ Auto-created initial task ${autoTask._id} for staff ${staffObj.userId || staffObj.name}`);
+                    orConditions.push({ _id: autoTask._id });
                 }
             }
         }

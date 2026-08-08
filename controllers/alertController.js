@@ -489,6 +489,8 @@ const assignAlert = async (req, res) => {
         if (device) {
             device.assignedStaff = staff._id;
             await device.save();
+            staff.assignedDevice = device._id;
+            await staff.save();
         }
 
         try {
