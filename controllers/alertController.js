@@ -434,7 +434,7 @@ const resolveAlert = async (req, res) => {
 
 const assignAlert = async (req, res) => {
     try {
-        const { staff_id } = req.body;
+        const { staff_id, taskName, notes } = req.body;
         const alertId = req.params.alertId;
         
         const alert = await Alert.findById(alertId);
@@ -470,11 +470,13 @@ const assignAlert = async (req, res) => {
         const now = new Date();
         const task = await Task.create({
             alert: alert._id,
+            taskName: taskName || alert.title || "Restroom Cleaning & Hygiene Task",
             device: device ? device._id : null,
             staff: staff._id,
             assignedBy: req.user ? req.user.id : null,
             assignedAt: now,
             status: "ASSIGNED",
+            notes: notes || "Assigned by Admin",
             timeline: [{
                 status: "ASSIGNED",
                 timestamp: now,
