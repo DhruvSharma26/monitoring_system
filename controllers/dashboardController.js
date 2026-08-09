@@ -104,7 +104,10 @@ const getDashboard = async (req, res) => {
 
             const dayLabel = dayNames[dayStart.getDay()];
 
+            const targetDateStr = `${dayStart.getFullYear()}-${String(dayStart.getMonth() + 1).padStart(2, '0')}-${String(dayStart.getDate()).padStart(2, '0')}`;
+
             const dayLogs = sensorLogs.filter(log => {
+                if (log.date) return log.date === targetDateStr;
                 const logTime = new Date(log.timestamp).getTime();
                 return logTime >= dayStart.getTime() && logTime <= dayEnd.getTime();
             });

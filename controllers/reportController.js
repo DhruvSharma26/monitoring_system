@@ -185,6 +185,7 @@ const calculateDailyBreakdown = (sensorLogs, fromDate, tillDate, statusObj) => {
         const dayFullLabel = dayNamesFull[d.getDay()];
 
         const dayLogs = sensorLogs.filter(log => {
+            if (log.date) return log.date === dateStr;
             if (!log.timestamp) return false;
             const logDate = formatDateLocal(new Date(log.timestamp));
             return logDate === dateStr;

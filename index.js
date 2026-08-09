@@ -231,10 +231,17 @@ function connectMQTT() {
           return; // Don't process if we don't know the device
         }
 
+        const recordTimestamp = payload.timestamp ? new Date(payload.timestamp) : new Date();
+        const yyyy = recordTimestamp.getFullYear();
+        const mm = String(recordTimestamp.getMonth() + 1).padStart(2, '0');
+        const dd = String(recordTimestamp.getDate()).padStart(2, '0');
+        const dateStr = `${yyyy}-${mm}-${dd}`;
+
         const sensorPayload = {
           device_uid: du,
           user_id: payload.user_id ?? payload.userId,
-          timestamp: payload.timestamp ?? new Date(),
+          timestamp: recordTimestamp,
+          date: dateStr,
           feedback: f !== undefined ? Number(f) : undefined,
           Counter: c !== undefined ? Number(c) : undefined,
           OdorSensVal: o !== undefined ? Number(o) : undefined

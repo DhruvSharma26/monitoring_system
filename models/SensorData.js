@@ -18,6 +18,11 @@ const sensorDataSchema = new mongoose.Schema(
         default: Date.now
     },
 
+    date: {
+        type: String, // YYYY-MM-DD
+        index: true
+    },
+
     feedback: {
         type: Number,
         enum: [0, 1, 2, 3, 4], // 0=Clean, 1=Clean, 2=Warning, 4=Critical
@@ -40,10 +45,15 @@ const sensorDataSchema = new mongoose.Schema(
 }
 );
 
-// Optimized for queries like:
-// SensorData.findOne({ device_uid }).sort({ timestamp: -1 })
+// Optimized for telemetry lookups, datewise graphs, and reports
 sensorDataSchema.index({
     device_uid: 1,
+    timestamp: -1
+});
+
+sensorDataSchema.index({
+    device_uid: 1,
+    date: 1,
     timestamp: -1
 });
 

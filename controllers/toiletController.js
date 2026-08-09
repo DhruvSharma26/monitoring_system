@@ -243,9 +243,15 @@ const markToiletClean = async (req, res) => {
         });
         if (!device) return res.status(404).json({ success: false, message: "Device not found" });
 
+        const cleanNow = new Date();
+        const yyyyC = cleanNow.getFullYear();
+        const mmC = String(cleanNow.getMonth() + 1).padStart(2, '0');
+        const ddC = String(cleanNow.getDate()).padStart(2, '0');
+        const cleanDateStr = `${yyyyC}-${mmC}-${ddC}`;
+
         await LatestDeviceStatus.findOneAndUpdate(
             { $or: [{ device_uid: device.device_uid }, { deviceId: device.deviceId }] },
-            { $set: { feedback: 0, Counter: 0, OdorSensVal: 0, timestamp: new Date() } },
+            { $set: { feedback: 0, Counter: 0, OdorSensVal: 0, timestamp: cleanNow, date: cleanDateStr } },
             { upsert: true, new: true }
         );
 
@@ -255,7 +261,8 @@ const markToiletClean = async (req, res) => {
             feedback: 0,
             Counter: 0,
             OdorSensVal: 0,
-            timestamp: new Date()
+            timestamp: cleanNow,
+            date: cleanDateStr
         });
 
         res.status(200).json({ success: true, message: "Toilet marked as clean" });
@@ -279,10 +286,17 @@ const postToiletTelemetry = async (req, res) => {
 
         if (!device) return res.status(404).json({ success: false, message: "Device not found" });
 
+        const now = new Date();
+        const yyyy = now.getFullYear();
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        const dateStr = `${yyyy}-${mm}-${dd}`;
+
         const sensorPayload = {
             device_uid: device.device_uid,
             deviceId: device.deviceId,
-            timestamp: new Date(),
+            timestamp: now,
+            date: dateStr,
             Counter: Counter !== undefined ? Number(Counter) : 0,
             OdorSensVal: OdorSensVal !== undefined ? Number(OdorSensVal) : 0,
             feedback: feedback !== undefined ? Number(feedback) : 1
