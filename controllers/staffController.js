@@ -3,6 +3,8 @@ const User = require("../models/User");
 const Device = require("../models/Device");
 const Otp = require("../models/Otp");
 const bcrypt = require("bcryptjs");
+const crypto = require("crypto");
+const { sendEmail } = require("../services/emailService");
 
 const registerStaff = async (req, res) => {
     try {
@@ -191,6 +193,138 @@ const deleteStaff = async (req, res) => {
     }
 };
 
+const sendStaffResetOtp = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const staff = await User.findById(id);
+        if (!staff || staff.role !== "staff") {
+            return res.status(404).json({
+                success: false,
+                message: "Staff member not found"
+            });
+        }
+
+        let isOwnerAdmin = staff.adminId && staff.adminId.toString() === req.user.id.toString();
+        if (!isOwnerAdmin && staff.assignedDevice) {
+            const device = await Device.findOne({ _id: staff.assignedDevice, adminId: req.user.id });
+            if (device) isOwnerAdmin = true;
+        }
+
+        if (!isOwnerAdmin) {
+            return res.status(403).json({
+                success: false,
+                message: "Unauthorized: You can only reset passwords for staff members registered under your account"
+            });
+        }
+
+        if (!staff.email) {
+            return res.status(400).json({
+                success: false,
+                message: "Staff member does not have an email address registered"
+            });
+        }
+
+        const normalizedEmail = staff.email.toLowerCase().trim();
+        const otp = crypto.randomInt(100000, 999999).toString();
+        const expiry = new Date(Date.now() + 5 * 60 * 1000);
+
+        await Otp.deleteMany({ email: normalizedEmail });
+        await Otp.create({
+            email: normalizedEmail,
+            otp,
+            expiresAt: expiry
+        });
+
+        console.log(`📧 [STAFF RESET OTP GENERATED] OTP ${otp} generated for staff ${staff.name} (${normalizedEmail})`);
+
+        await sendEmail({
+            to: normalizedEmail,
+            subject: "Sinexus - Staff Password Reset OTP",
+            text: `Hello ${staff.name}, Your OTP for password reset requested by Admin is: ${otp}. Valid for 5 minutes.`,
+            html: `
+                <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+                    <h2 style="color: #1565C0;">Sinexus Staff Password Reset</h2>
+                    <p>Hello <strong>${staff.name}</strong>,</p>
+                    <p>Your Admin has initiated a password reset for your account. Use the OTP code below to verify:</p>
+                    <div style="font-size: 26px; font-weight: bold; letter-spacing: 4px; color: #1565C0; background: #f0f4f8; padding: 12px 24px; display: inline-block; border-radius: 8px; margin: 10px 0;">
+                        ${otp}
+                    </div>
+                    <p style="margin-top: 20px; font-size: 12px; color: #777;">This OTP will expire in 5 minutes.</p>
+                </div>
+            `
+        });
+
+        res.status(200).json({
+            success: true,
+            message: `OTP sent successfully to staff email: ${normalizedEmail}`
+        });
+    } catch (error) {
+        console.error("Error sending staff reset OTP:", error);
+        res.status(500).json({
+            success: false,
+            message: error.message || "Server Error"
+        });
+    }
+};
+
+const verifyStaffResetOtp = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { otp } = req.body;
+
+        if (!otp) {
+            return res.status(400).json({
+                success: false,
+                message: "OTP code is required"
+            });
+        }
+
+        const staff = await User.findById(id);
+        if (!staff || staff.role !== "staff") {
+            return res.status(404).json({
+                success: false,
+                message: "Staff member not found"
+            });
+        }
+
+        const normalizedEmail = staff.email.toLowerCase().trim();
+        const trimmedOtp = otp.toString().trim();
+
+        const otpRecord = await Otp.findOne({
+            email: normalizedEmail,
+            otp: trimmedOtp
+        });
+
+        if (!otpRecord) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid OTP code"
+            });
+        }
+
+        if (otpRecord.expiresAt < new Date()) {
+            return res.status(400).json({
+                success: false,
+                message: "OTP code expired. Please request a new OTP."
+            });
+        }
+
+        otpRecord.verified = true;
+        await otpRecord.save();
+
+        res.status(200).json({
+            success: true,
+            message: "OTP verified successfully"
+        });
+    } catch (error) {
+        console.error("Error verifying staff reset OTP:", error);
+        res.status(500).json({
+            success: false,
+            message: error.message || "Server Error"
+        });
+    }
+};
+
 const resetStaffPassword = async (req, res) => {
     try {
         const { id } = req.params;
@@ -233,9 +367,32 @@ const resetStaffPassword = async (req, res) => {
             });
         }
 
+        // Check if OTP was verified for this staff's email
+        const normalizedEmail = staff.email.toLowerCase().trim();
+        const otpRecord = await Otp.findOne({
+            email: normalizedEmail,
+            verified: true
+        });
+
+        if (!otpRecord) {
+            return res.status(400).json({
+                success: false,
+                message: "Staff email OTP verification is required before resetting password"
+            });
+        }
+
+        if (otpRecord.expiresAt < new Date()) {
+            return res.status(400).json({
+                success: false,
+                message: "OTP expired. Please send and verify a new OTP."
+            });
+        }
+
         const hashedPassword = await bcrypt.hash(targetPassword.trim(), 10);
         staff.password = hashedPassword;
         await staff.save();
+
+        await Otp.deleteMany({ email: normalizedEmail });
 
         res.status(200).json({
             success: true,
@@ -255,5 +412,7 @@ module.exports = {
     registerStaff,
     getStaff,
     deleteStaff,
+    sendStaffResetOtp,
+    verifyStaffResetOtp,
     resetStaffPassword
 };

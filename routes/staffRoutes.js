@@ -9,6 +9,8 @@ const {
     registerStaff,
     getStaff,
     deleteStaff,
+    sendStaffResetOtp,
+    verifyStaffResetOtp,
     resetStaffPassword
 } = require(
     "../controllers/staffController"
@@ -30,6 +32,18 @@ router.delete(
     "/:id",
     authMiddleware,
     deleteStaff
+);
+
+router.post(
+    "/:id/send-reset-otp",
+    authMiddleware,
+    sendStaffResetOtp
+);
+
+router.post(
+    "/:id/verify-reset-otp",
+    authMiddleware,
+    verifyStaffResetOtp
 );
 
 router.post(
