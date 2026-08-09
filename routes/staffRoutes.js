@@ -8,7 +8,8 @@ require("../middleware/authMiddleware");
 const {
     registerStaff,
     getStaff,
-    deleteStaff
+    deleteStaff,
+    resetStaffPassword
 } = require(
     "../controllers/staffController"
 );
@@ -29,6 +30,12 @@ router.delete(
     "/:id",
     authMiddleware,
     deleteStaff
+);
+
+router.post(
+    "/:id/reset-password",
+    authMiddleware,
+    resetStaffPassword
 );
 
 module.exports = router;

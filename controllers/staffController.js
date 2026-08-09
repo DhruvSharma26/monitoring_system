@@ -191,8 +191,69 @@ const deleteStaff = async (req, res) => {
     }
 };
 
+const resetStaffPassword = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { newPassword, password } = req.body;
+        const targetPassword = newPassword || password;
+
+        if (!targetPassword || targetPassword.trim() === "") {
+            return res.status(400).json({
+                success: false,
+                message: "New password is required"
+            });
+        }
+
+        if (targetPassword.trim().length < 6) {
+            return res.status(400).json({
+                success: false,
+                message: "Password must be at least 6 characters long"
+            });
+        }
+
+        const staff = await User.findById(id);
+        if (!staff || staff.role !== "staff") {
+            return res.status(404).json({
+                success: false,
+                message: "Staff member not found"
+            });
+        }
+
+        // Ownership check: Admin can only reset password of staff registered under them
+        let isOwnerAdmin = staff.adminId && staff.adminId.toString() === req.user.id.toString();
+        if (!isOwnerAdmin && staff.assignedDevice) {
+            const device = await Device.findOne({ _id: staff.assignedDevice, adminId: req.user.id });
+            if (device) isOwnerAdmin = true;
+        }
+
+        if (!isOwnerAdmin) {
+            return res.status(403).json({
+                success: false,
+                message: "Unauthorized: You can only reset passwords for staff members registered under your account"
+            });
+        }
+
+        const hashedPassword = await bcrypt.hash(targetPassword.trim(), 10);
+        staff.password = hashedPassword;
+        await staff.save();
+
+        res.status(200).json({
+            success: true,
+            message: "Staff password reset successfully"
+        });
+
+    } catch (error) {
+        console.error("Error resetting staff password:", error);
+        res.status(500).json({
+            success: false,
+            message: error.message || "Server Error"
+        });
+    }
+};
+
 module.exports = {
     registerStaff,
     getStaff,
-    deleteStaff
+    deleteStaff,
+    resetStaffPassword
 };

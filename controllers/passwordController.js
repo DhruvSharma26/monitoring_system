@@ -25,6 +25,13 @@ const sendForgotOtp = async (req, res, next) => {
             });
         }
 
+        if (user.role === "staff") {
+            return res.status(400).json({
+                success: false,
+                message: "Staff members cannot reset password via email. Please contact your Admin to reset your password."
+            });
+        }
+
         const otp = crypto.randomInt(100000, 999999).toString();
         const expiry = new Date(Date.now() + 5 * 60 * 1000);
 

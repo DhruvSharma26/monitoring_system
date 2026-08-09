@@ -690,7 +690,7 @@ const downloadReportPdf = async (req, res) => {
         const periodFromStr = fromDate.toISOString().split("T")[0];
         const periodTillStr = tillDate.toISOString().split("T")[0];
 
-        const doc = new PDFDocument({ margin: 40, size: "A4" });
+        const doc = new PDFDocument({ margin: 40, size: "A4", bufferPages: true });
 
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="${device.deviceId || device.device_uid}_Report.pdf"`);
@@ -729,7 +729,7 @@ const downloadReportPdf = async (req, res) => {
         if (incCounter !== "false") doc.fillColor("#333333").fontSize(11).text(`• Total Visitor Usage Counter (Last 1 Week): ${metrics.totalUsage7Days}${metrics.totalUsage7Days === 'N/A' ? '' : ' Entries'}`);
 
         doc.moveDown(0.8);
-        doc.fillColor("#0066FF").fontSize(12).text("LAST 1 WEEK DATEWISE BREAKDOWN TABLE", { underline: true });
+        doc.fillColor("#0066FF").fontSize(12).text("DATEWISE BREAKDOWN TABLE", { underline: true });
         doc.moveDown(0.4);
 
         const historyListPdf = calculateDailyBreakdown(sensorLogs, fromDate, tillDate, statusObj);
@@ -737,36 +737,32 @@ const downloadReportPdf = async (req, res) => {
         const tableStartX = 40;
         let tableY = doc.y;
 
-        if (tableY > 640) {
+        if (tableY > 580) {
             doc.addPage();
             tableY = 40;
         }
         
-        // Draw Header Box
-        doc.rect(tableStartX, tableY, 510, 20).fill("#0066FF");
-        doc.fillColor("#FFFFFF").fontSize(9).font("Helvetica-Bold");
-        doc.text("Date", tableStartX + 8, tableY + 5, { width: 90 });
-        doc.text("Day", tableStartX + 100, tableY + 5, { width: 70 });
-        doc.text("Avg Rating", tableStartX + 175, tableY + 5, { width: 85 });
-        doc.text("Avg Odor", tableStartX + 265, tableY + 5, { width: 75 });
-        doc.text("Visitor Usages", tableStartX + 345, tableY + 5, { width: 95 });
-        doc.text("Feedbacks", tableStartX + 445, tableY + 5, { width: 65 });
-        
+        // Function to draw header box
+        const drawTableHeader = (y) => {
+            doc.rect(tableStartX, y, 510, 20).fill("#0066FF");
+            doc.fillColor("#FFFFFF").fontSize(9).font("Helvetica-Bold");
+            doc.text("Date", tableStartX + 8, y + 5, { width: 90 });
+            doc.text("Day", tableStartX + 100, y + 5, { width: 70 });
+            doc.text("Avg Rating", tableStartX + 175, y + 5, { width: 85 });
+            doc.text("Avg Odor", tableStartX + 265, y + 5, { width: 75 });
+            doc.text("Visitor Usages", tableStartX + 345, y + 5, { width: 95 });
+            doc.text("Feedbacks", tableStartX + 445, y + 5, { width: 65 });
+        };
+
+        drawTableHeader(tableY);
         tableY += 20;
         doc.font("Helvetica");
 
         historyListPdf.forEach((item, idx) => {
-            if (tableY > 740) {
+            if (tableY > 730) {
                 doc.addPage();
                 tableY = 40;
-                doc.rect(tableStartX, tableY, 510, 20).fill("#0066FF");
-                doc.fillColor("#FFFFFF").fontSize(9).font("Helvetica-Bold");
-                doc.text("Date", tableStartX + 8, tableY + 5, { width: 90 });
-                doc.text("Day", tableStartX + 100, tableY + 5, { width: 70 });
-                doc.text("Avg Rating", tableStartX + 175, tableY + 5, { width: 85 });
-                doc.text("Avg Odor", tableStartX + 265, tableY + 5, { width: 75 });
-                doc.text("Visitor Usages", tableStartX + 345, tableY + 5, { width: 95 });
-                doc.text("Feedbacks", tableStartX + 445, tableY + 5, { width: 65 });
+                drawTableHeader(tableY);
                 tableY += 20;
                 doc.font("Helvetica");
             }
@@ -801,7 +797,7 @@ const downloadReportPdf = async (req, res) => {
                 doc.fillColor("#666666").fontSize(10).text("No staff cleaning tasks completed during this report period.");
             } else {
                 for (const t of auditTasks) {
-                    if (doc.y > 730) {
+                    if (doc.y > 720) {
                         doc.addPage();
                     }
                     const sName = t.staff ? (t.staff.name || "Staff Member") : "Unassigned Staff";
@@ -825,8 +821,17 @@ const downloadReportPdf = async (req, res) => {
             }
         }
 
-        doc.moveDown(2);
-        doc.fillColor("#999999").fontSize(9).text("Confidential report generated automatically by Sinexus Edge IoT Platform.", { align: "center" });
+        // Global Footer & Page Pagination Across All Pages
+        const range = doc.bufferedPageRange();
+        for (let i = range.start; i < range.start + range.count; i++) {
+            doc.switchToPage(i);
+            doc.fillColor("#999999").fontSize(8).text(
+                `Confidential report generated automatically by Sinexus Edge IoT Platform.  |  Page ${i + 1} of ${range.count}`,
+                40,
+                doc.page.height - 30,
+                { align: "center", width: 515 }
+            );
+        }
 
         doc.end();
     } catch (error) {
