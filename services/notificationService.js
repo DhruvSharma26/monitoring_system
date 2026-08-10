@@ -210,8 +210,16 @@ async function sendTaskSubmittedNotification(taskDoc, staffUser, deviceDoc) {
         }
 
         const recipients = Array.from(recipientMap.values());
+        const allAdminTokens = new Set();
 
         for (const adminUser of recipients) {
+            // Collect primary FCM token first to prevent multiple tokens for same device
+            if (adminUser.fcmToken) {
+                allAdminTokens.add(adminUser.fcmToken);
+            } else if (Array.isArray(adminUser.fcmTokens)) {
+                adminUser.fcmTokens.filter(Boolean).forEach(token => allAdminTokens.add(token));
+            }
+
             // Save DB Notification
             const dbNotification = await Notification.create({
                 recipient: adminUser._id,
@@ -223,29 +231,24 @@ async function sendTaskSubmittedNotification(taskDoc, staffUser, deviceDoc) {
                 type: "TASK_SUBMITTED"
             });
 
-            // Send FCM Push with strictly deduplicated tokens
-            let userTokens = [];
-            if (adminUser.fcmToken) userTokens.push(adminUser.fcmToken);
-            if (Array.isArray(adminUser.fcmTokens)) userTokens.push(...adminUser.fcmTokens);
-            userTokens = Array.from(new Set(userTokens.filter(Boolean)));
-
-            if (userTokens.length > 0) {
-                await sendPushNotification({
-                    tokens: userTokens,
-                    title: title,
-                    body: message,
-                    data: {
-                        taskId: taskDoc._id.toString(),
-                        device_uid: deviceUid
-                    }
-                });
-            }
-
             // Targeted Socket emission
             if (global.io) {
                 global.io.to(`user_${adminUser._id}`).emit("new_notification", dbNotification);
-                global.io.to(`user_${adminUser._id}`).emit("user_notification", dbNotification);
             }
+        }
+
+        // Send FCM Push ONCE for all targeted admin tokens (strictly deduplicated)
+        const userTokens = Array.from(allAdminTokens);
+        if (userTokens.length > 0) {
+            await sendPushNotification({
+                tokens: userTokens,
+                title: title,
+                body: message,
+                data: {
+                    taskId: taskDoc._id.toString(),
+                    device_uid: deviceUid
+                }
+            });
         }
     } catch (error) {
         console.log("❌ sendTaskSubmittedNotification Error:", error.message);
