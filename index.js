@@ -175,80 +175,65 @@ const MQTT_TOPICS =
 // ───────────────────────────────────────────────────────────
 
 function connectMQTT() {
-  const options = {
-    clientId:
-      "node_backend_" +
-      Math.random().toString(16).slice(2, 8),
+  let activeBroker = MQTT_BROKER;
+  let hasFallenBack = false;
 
-    clean: true,
-    reconnectPeriod: 3000,
-    connectTimeout: 30000,
-    rejectUnauthorized: false, // Prevents TLS issues on hosted environments
-    protocolVersion: 4, // Explicitly use MQTT 3.1.1
+  const createClient = (brokerUrl, useAuth = true) => {
+    const options = {
+      clientId: "node_backend_" + Math.random().toString(16).slice(2, 8),
+      clean: true,
+      reconnectPeriod: 5000,
+      connectTimeout: 10000,
+      rejectUnauthorized: false, // Prevents TLS issues on hosted environments
+      protocolVersion: 4, // Explicitly use MQTT 3.1.1
+    };
+
+    if (useAuth && MQTT_USERNAME) {
+      options.username = MQTT_USERNAME;
+      options.password = MQTT_PASSWORD;
+    }
+
+    console.log("🔌 Connecting to MQTT Broker:", brokerUrl);
+    return mqtt.connect(brokerUrl, options);
   };
 
-  if (MQTT_USERNAME) {
-    options.username = MQTT_USERNAME;
-    options.password = MQTT_PASSWORD;
-  }
+  let client = createClient(activeBroker);
 
-  console.log(
-    "🔌 Connecting to MQTT:",
-    MQTT_BROKER
-  );
+  const setupClientListeners = (clientInstance) => {
+    clientInstance.on("connect", () => {
+      console.log(`✅ MQTT Connected successfully to: ${activeBroker}`);
 
-  const client = mqtt.connect(
-    MQTT_BROKER,
-    options
-  );
-
-  client.on("connect", () => {
-    console.log("✅ MQTT Connected");
-
-    MQTT_TOPICS.forEach((topic) => {
-      client.subscribe(topic, (err) => {
-        if (err) {
-          console.log(
-            "❌ Subscription Error:",
-            err.message
-          );
-        } else {
-          console.log(
-            `📡 Subscribed -> ${topic}`
-          );
-        }
+      MQTT_TOPICS.forEach((topic) => {
+        clientInstance.subscribe(topic, (err) => {
+          if (err) {
+            console.log(`❌ Subscription Error on ${topic}:`, err.message);
+          } else {
+            console.log(`📡 Subscribed -> ${topic}`);
+          }
+        });
       });
     });
-  });
 
-  client.on(
-    "message",
-    async (topic, message) => {
+    clientInstance.on("message", async (topic, message) => {
       try {
         const raw = message.toString();
-
-        console.log(
-          `📨 Topic: ${topic}`
-        );
+        console.log(`📨 MQTT Topic: ${topic}`);
 
         let payload;
-
         try {
           payload = JSON.parse(raw);
         } catch {
-          payload = {
-            rawMessage: raw,
-          };
+          payload = { rawMessage: raw };
         }
 
         const du = payload.device_uid ?? payload.deviceId ?? payload.device_id;
         const f = payload.feedback ?? payload.FeedBack ?? payload.Feedback ?? payload.feedBack;
         const c = payload.Counter ?? payload.counter ?? payload.CounterValue;
         const o = payload.OdorSensVal ?? payload.odorSensVal ?? payload.odor ?? payload.Odor ?? payload.OdorLevel;
-        
+
         if (!du) {
           console.log("⚠️ Missing device identifier in payload:", raw);
-          return; // Don't process if we don't know the device
+          return;
         }
 
         const recordTimestamp = payload.timestamp ? new Date(payload.timestamp) : new Date();
@@ -267,102 +252,100 @@ function connectMQTT() {
           OdorSensVal: o !== undefined ? Number(o) : undefined
         };
 
-// Save historical data
-await SensorData.create(
-  sensorPayload
-);
+        // Save historical data
+        await SensorData.create(sensorPayload);
 
-// Update latest device state
-await LatestDeviceStatus.findOneAndUpdate(
-{
-  device_uid:
-    du
-},
-{
-  $set: sensorPayload
-},
-{
-  upsert: true,
-  new: true
-}
-);
-
-console.log(
-  "💾 Sensor data & device status saved"
-);
-
-// Emit WebSocket event to frontend
-if (global.io) {
-  global.io.emit("device_status_update", sensorPayload);
-  
-  const settings = await Settings.findOne() || { counterThreshold: 100, odorThreshold: 80 };
-  
-  let alertType = null;
-  let alertMessage = "";
-
-  if (sensorPayload.feedback === 4) {
-    alertType = "CRITICAL_FEEDBACK";
-    alertMessage = "Critical";
-  } else if (sensorPayload.feedback === 3) {
-    alertType = "WARNING_FEEDBACK";
-    alertMessage = "Needs Attention";
-  } else if (sensorPayload.OdorSensVal > settings.odorThreshold) {
-    alertType = "HIGH_ODOR";
-    alertMessage = "High Odor Value";
-  } else if (sensorPayload.Counter > settings.counterThreshold) {
-    alertType = "HIGH_USAGE";
-    alertMessage = "High Counter Value";
-  }
-
-  if (alertType) {
-    const alertService = require("./services/alertService");
-    const { alert: alertDoc, device: dev, isOverwritten } = await alertService.processOrCreateDeviceAlert({
-      device_uid: sensorPayload.device_uid,
-      alertType: alertType,
-      feedback: sensorPayload.feedback,
-      Counter: sensorPayload.Counter,
-      OdorSensVal: sensorPayload.OdorSensVal
-    });
-
-    const alertSocketData = {
-      device_uid: sensorPayload.device_uid,
-      alert_id: alertDoc._id,
-      type: alertType,
-      message: alertMessage,
-      feedback: sensorPayload.feedback,
-      isOverwritten: isOverwritten
-    };
-
-    const targetDev = dev || await Device.findOne({ device_uid: sensorPayload.device_uid });
-    if (targetDev && targetDev.adminId) {
-      global.io.to(`user_${targetDev.adminId}`).emit("new_alert", alertSocketData);
-    }
-    if (targetDev && targetDev.assignedStaff) {
-      global.io.to(`user_${targetDev.assignedStaff}`).emit("new_alert", alertSocketData);
-    }
-
-    // Send notifications to Admin and Assigned Staff (FCM Push, DB, Socket, Email)
-    notificationService.handleMqttAlertNotification(sensorPayload, alertType, alertDoc);
-  }
-}
-
-      } catch (error) {
-
-        console.log(
-          "❌ MQTT Save Error:",
-          error.message
+        // Update latest device state
+        await LatestDeviceStatus.findOneAndUpdate(
+          { device_uid: du },
+          { $set: sensorPayload },
+          { upsert: true, new: true }
         );
 
-      }
-    }
-  );
+        console.log("💾 Sensor data & device status saved");
 
-  client.on("error", (err) => {
-    console.log(
-      "❌ MQTT Error:",
-      err.message
-    );
-  });
+        // 1. Emit live status WebSocket event to all connected clients
+        if (global.io) {
+          global.io.emit("device_status_update", sensorPayload);
+        }
+
+        // 2. Evaluate Alerts & Thresholds (Runs independently of global.io)
+        const settings = await Settings.findOne() || { counterThreshold: 100, odorThreshold: 80 };
+        
+        let alertType = null;
+        let alertMessage = "";
+
+        if (sensorPayload.feedback === 4) {
+          alertType = "CRITICAL_FEEDBACK";
+          alertMessage = "Critical";
+        } else if (sensorPayload.feedback === 3) {
+          alertType = "WARNING_FEEDBACK";
+          alertMessage = "Needs Attention";
+        } else if (sensorPayload.OdorSensVal > settings.odorThreshold) {
+          alertType = "HIGH_ODOR";
+          alertMessage = "High Odor Value";
+        } else if (sensorPayload.Counter > settings.counterThreshold) {
+          alertType = "HIGH_USAGE";
+          alertMessage = "High Counter Value";
+        }
+
+        if (alertType) {
+          const alertService = require("./services/alertService");
+          const { alert: alertDoc, device: dev, isOverwritten } = await alertService.processOrCreateDeviceAlert({
+            device_uid: sensorPayload.device_uid,
+            alertType: alertType,
+            feedback: sensorPayload.feedback,
+            Counter: sensorPayload.Counter,
+            OdorSensVal: sensorPayload.OdorSensVal
+          });
+
+          const alertSocketData = {
+            device_uid: sensorPayload.device_uid,
+            alert_id: alertDoc._id,
+            type: alertType,
+            message: alertMessage,
+            feedback: sensorPayload.feedback,
+            isOverwritten: isOverwritten
+          };
+
+          const targetDev = dev || await Device.findOne({
+            $or: [{ device_uid: sensorPayload.device_uid }, { deviceId: sensorPayload.device_uid }]
+          });
+
+          if (global.io) {
+            if (targetDev && targetDev.adminId) {
+              global.io.to(`user_${targetDev.adminId}`).emit("new_alert", alertSocketData);
+            }
+            if (targetDev && targetDev.assignedStaff) {
+              global.io.to(`user_${targetDev.assignedStaff}`).emit("new_alert", alertSocketData);
+            }
+          }
+
+          // Send notifications to Admin and Assigned Staff (FCM Push, DB, Socket, Email)
+          await notificationService.handleMqttAlertNotification(sensorPayload, alertType, alertDoc);
+        }
+
+      } catch (error) {
+        console.log("❌ MQTT Processing Error:", error.message);
+      }
+    });
+
+    clientInstance.on("error", (err) => {
+      console.log("❌ MQTT Error:", err.message);
+
+      // Fallback to public EMQX broker if custom broker fails auth / connection
+      if (!hasFallenBack && (err.message.includes("Not authorized") || err.message.includes("connack timeout"))) {
+        hasFallenBack = true;
+        console.log("⚠️ Primary MQTT broker failed. Falling back to public broker (mqtt://broker.emqx.io:1883)...");
+        clientInstance.end(true);
+        activeBroker = "mqtt://broker.emqx.io:1883";
+        client = createClient(activeBroker, false);
+        setupClientListeners(client);
+      }
+    });
+  };
+
+  setupClientListeners(client);
 }
 
 connectMQTT();

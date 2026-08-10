@@ -11,8 +11,10 @@ async function handleMqttAlertNotification(sensorPayload, alertType, alertDoc) {
     try {
         const deviceUid = sensorPayload.device_uid;
 
-        // 1. Locate Device details
-        const device = await Device.findOne({ device_uid: deviceUid });
+        // 1. Locate Device details (support both device_uid and deviceId)
+        const device = await Device.findOne({
+            $or: [{ device_uid: deviceUid }, { deviceId: deviceUid }]
+        });
 
         // 2. Identify Recipient Users (Targeted ONLY to Admin who registered the device & Assigned Staff)
         const recipientUserIds = new Set();
