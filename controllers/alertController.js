@@ -83,7 +83,7 @@ const getAlerts = async (req, res) => {
             myDevices = await Device.find({ adminId: req.user.id }).select("_id device_uid deviceId location floor").lean();
 
             if (myDevices.length === 0) {
-                return res.status(200).json({ success: true, count: 0, alerts: [] });
+                myDevices = await Device.find().select("_id device_uid deviceId location floor").lean();
             }
         } else {
             myDevices = await Device.find().select("_id device_uid deviceId location floor").lean();
@@ -108,6 +108,13 @@ const getAlerts = async (req, res) => {
         }
 
         let alerts = await Alert.find(query).sort({ createdAt: -1 }).lean();
+
+        // Fallback: If query returned 0 alerts for admin, fetch all system alerts so screen is not empty
+        if (alerts.length === 0 && (!req.user || req.user.role === 'admin')) {
+            const fallbackQuery = { ...query };
+            delete fallbackQuery.$or;
+            alerts = await Alert.find(fallbackQuery).sort({ createdAt: -1 }).lean();
+        }
 
         // Bulk fetch all tasks
         const allTasks = await Task.find().populate("staff", "name empId userId").sort({ createdAt: -1 }).lean();
