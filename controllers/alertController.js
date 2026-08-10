@@ -80,12 +80,7 @@ const getAlerts = async (req, res) => {
                 query.createdAt = { $gte: new Date(staffCreationTime) };
             }
         } else {
-            const adminDevices = await Device.find({ adminId: req.user.id }).select("device_uid deviceId location floor").lean();
-            if (adminDevices.length > 0) {
-                myDevices = adminDevices;
-            } else {
-                myDevices = await Device.find().select("device_uid deviceId location floor").lean();
-            }
+            myDevices = await Device.find().select("device_uid deviceId location floor").lean();
         }
 
         const deviceMap = {};
@@ -94,13 +89,15 @@ const getAlerts = async (req, res) => {
             if (d.deviceId) deviceMap[d.deviceId.toLowerCase()] = d;
         });
 
-        const allDeviceUids = myDevices.flatMap(d => [d.device_uid, d.deviceId, d._id ? d._id.toString() : null].filter(Boolean));
-        if (allDeviceUids.length > 0) {
-            const regexUids = allDeviceUids.map(u => new RegExp(`^${u.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'));
-            query.$or = [
-                { device_uid: { $in: regexUids } },
-                { deviceId: { $in: regexUids } }
-            ];
+        if (req.user && req.user.role === 'staff') {
+            const allDeviceUids = myDevices.flatMap(d => [d.device_uid, d.deviceId, d._id ? d._id.toString() : null].filter(Boolean));
+            if (allDeviceUids.length > 0) {
+                const regexUids = allDeviceUids.map(u => new RegExp(`^${u.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'));
+                query.$or = [
+                    { device_uid: { $in: regexUids } },
+                    { deviceId: { $in: regexUids } }
+                ];
+            }
         }
 
         const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
