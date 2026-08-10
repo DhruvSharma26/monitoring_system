@@ -16,11 +16,18 @@ const getDashboard = async (req, res) => {
             devices = await Device.find().sort({ createdAt: -1 }).lean();
         }
 
-        const [statuses, liveAlerts] =
+        const [statuses, liveAlerts, settings] =
             await Promise.all([
                 LatestDeviceStatus.find().lean(),
-                Alert.find({ status: "OPEN" }).sort({ createdAt: -1 }).limit(5).lean()
+                Alert.find({ status: "OPEN" }).sort({ createdAt: -1 }).limit(5).lean(),
+                Settings.findOne({ adminId: req.user.id }).lean()
             ]);
+
+        const userSettings = settings || (await Settings.findOne().lean());
+        const odorThreshold = userSettings?.odorThreshold || 80;
+        const counterThreshold = userSettings?.counterThreshold || 100;
+        const warningOdorThreshold = Math.round(odorThreshold * 0.625);
+        const warningCounterThreshold = Math.round(counterThreshold * 0.7);
 
         const totalToilets = devices.length;
 
@@ -47,10 +54,13 @@ const getDashboard = async (req, res) => {
 
             let toiletStatus = "clean";
             if (item) {
-                if (item.feedback === 3 || (item.OdorSensVal || 0) >= 50) {
+                const odor = Number(item.OdorSensVal) || 0;
+                const counter = Number(item.Counter) || 0;
+
+                if (item.feedback === 3 || odor >= warningOdorThreshold || counter >= warningCounterThreshold) {
                     toiletStatus = "warning";
                 }
-                if (item.feedback === 4 || (item.OdorSensVal || 0) >= 80) {
+                if (item.feedback === 4 || odor >= odorThreshold || counter >= counterThreshold) {
                     toiletStatus = "critical";
                 }
             }

@@ -21,15 +21,23 @@ const getToilets = async (req, res) => {
         }
         const devices = adminDevices;
 
-        const [statuses, allSensorLogs, completedTasks, allStaff] = await Promise.all([
+        const Settings = require("../models/Settings");
+        const [statuses, allSensorLogs, completedTasks, allStaff, settings] = await Promise.all([
             LatestDeviceStatus.find().lean(),
             SensorData.find().sort({ timestamp: 1 }).lean(),
             Task.find({ status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] } })
                 .populate("staff", "name empId userId")
                 .sort({ updatedAt: -1 })
                 .lean(),
-            User.find({ role: "staff" }).select("name empId userId assignedDevice").lean()
+            User.find({ role: "staff" }).select("name empId userId assignedDevice").lean(),
+            Settings.findOne({ adminId: req.user.id }).lean()
         ]);
+
+        const userSettings = settings || (await Settings.findOne().lean());
+        const odorThreshold = userSettings?.odorThreshold || 80;
+        const counterThreshold = userSettings?.counterThreshold || 100;
+        const warningOdorThreshold = Math.round(odorThreshold * 0.625);
+        const warningCounterThreshold = Math.round(counterThreshold * 0.7);
 
         const statusMap = {};
         statuses.forEach(item => {
@@ -67,10 +75,13 @@ const getToilets = async (req, res) => {
             }
 
             let toiletStatus = "clean";
-            if (latestStatus.feedback === 3 || (latestStatus.OdorSensVal || 0) >= 50) {
+            const odor = Number(latestStatus.OdorSensVal) || 0;
+            const counter = Number(latestStatus.Counter) || 0;
+
+            if (latestStatus.feedback === 3 || odor >= warningOdorThreshold || counter >= warningCounterThreshold) {
                 toiletStatus = "warning";
             }
-            if (latestStatus.feedback === 4 || (latestStatus.OdorSensVal || 0) >= 80) {
+            if (latestStatus.feedback === 4 || odor >= odorThreshold || counter >= counterThreshold) {
                 toiletStatus = "critical";
             }
 

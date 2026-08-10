@@ -29,7 +29,8 @@ const getToiletDetails = async (req, res) => {
         const targetUids = [device.device_uid, device.deviceId, device._id ? device._id.toString() : null].filter(Boolean);
         const regexUids = targetUids.map(u => new RegExp(`^${u.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'));
 
-        const [latestStatus, alerts, tasks, staff, last7DaysSensorLogs, lastCompletedTask, completedTasks7Days] = await Promise.all([
+        const Settings = require("../models/Settings");
+        const [latestStatus, alerts, tasks, staff, last7DaysSensorLogs, lastCompletedTask, completedTasks7Days, settings] = await Promise.all([
             LatestDeviceStatus.findOne({
                 $or: [{ device_uid: { $in: regexUids } }, { deviceId: { $in: regexUids } }]
             }).lean(),
@@ -47,13 +48,23 @@ const getToiletDetails = async (req, res) => {
                 device: device._id,
                 status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] },
                 updatedAt: { $gte: sevenDaysAgo }
-            }).lean()
+            }).lean(),
+            Settings.findOne({ adminId: req.user.id }).lean()
         ]);
+
+        const userSettings = settings || (await Settings.findOne().lean());
+        const odorThreshold = userSettings?.odorThreshold || 80;
+        const counterThreshold = userSettings?.counterThreshold || 100;
+        const warningOdorThreshold = Math.round(odorThreshold * 0.625);
+        const warningCounterThreshold = Math.round(counterThreshold * 0.7);
 
         let status = "clean";
         if (latestStatus) {
-            if (latestStatus.feedback === 3 || latestStatus.OdorSensVal >= 50) status = "warning";
-            if (latestStatus.feedback === 4 || latestStatus.OdorSensVal >= 80) status = "critical";
+            const odor = Number(latestStatus.OdorSensVal) || 0;
+            const counter = Number(latestStatus.Counter) || 0;
+
+            if (latestStatus.feedback === 3 || odor >= warningOdorThreshold || counter >= warningCounterThreshold) status = "warning";
+            if (latestStatus.feedback === 4 || odor >= odorThreshold || counter >= counterThreshold) status = "critical";
         }
 
         let lastCleanedByStaff = "Not yet cleaned today";
