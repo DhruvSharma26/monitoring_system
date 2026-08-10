@@ -146,10 +146,13 @@ const getAlerts = async (req, res) => {
                 processedTaskIds.add(task._id.toString());
                 alertItem.taskId = task._id;
                 alertItem.taskStatus = task.status;
+                alertItem.adminRemarks = task.adminRemarks || alertItem.adminRemarks || "";
                 alertItem.taskProgressPercent = (task.status === "VERIFIED" || task.status === "COMPLETED" || task.status === "RESOLVED") ? 100 : (task.progressPercent || 0);
 
                 if (task.status === "VERIFIED" || task.status === "COMPLETED" || task.status === "RESOLVED") {
-                    alertItem.status = "RESOLVED";
+                    alertItem.status = "VERIFIED";
+                } else if (task.status === "REJECTED") {
+                    alertItem.status = "REJECTED";
                 }
 
                 let photos = [];
@@ -178,8 +181,8 @@ const getAlerts = async (req, res) => {
                 alertItem.taskCleaningPhotos = [];
             }
 
-            // Exclude resolved alerts older than 15 days based strictly on resolvedAt timestamp
-            if (alertItem.status === "RESOLVED") {
+            // Exclude verified/resolved alerts older than 15 days based strictly on resolvedAt timestamp
+            if (alertItem.status === "VERIFIED" || alertItem.status === "RESOLVED") {
                 const resolvedDate = alertItem.resolvedAt || alertItem.verifiedAt || alertItem.completedAt || alertItem.updatedAt;
                 if (resolvedDate && new Date(resolvedDate) < fifteenDaysAgo) {
                     continue;
@@ -217,6 +220,7 @@ const getAlerts = async (req, res) => {
             }
 
             const isResolved = task.status === "VERIFIED" || task.status === "COMPLETED" || task.status === "RESOLVED";
+            const isRejected = task.status === "REJECTED";
 
             const syntheticAlert = {
                 _id: task._id,
@@ -226,8 +230,9 @@ const getAlerts = async (req, res) => {
                 deviceLocation: devInfo ? `${devInfo.location || ''}${devInfo.floor ? ' - Floor ' + devInfo.floor : ''}` : (task.device_uid || ''),
                 alertType: task.title || 'TASK_ASSIGNED',
                 feedback: 3,
-                status: isResolved ? 'RESOLVED' : 'OPEN',
+                status: isResolved ? 'VERIFIED' : (isRejected ? 'REJECTED' : 'ASSIGNED'),
                 taskStatus: task.status,
+                adminRemarks: task.adminRemarks || '',
                 taskProgressPercent: isResolved ? 100 : (task.progressPercent || 0),
                 taskCleaningPhotos: photos.filter(Boolean),
                 assignedAt: task.assignedAt || task.createdAt,
@@ -409,6 +414,14 @@ const resolveAlert = async (req, res) => {
 
         if (global.io) {
             global.io.emit("new_alert", { alertId: alert._id, status: "RESOLVED" });
+        }
+
+        // Automatically mark all unread notifications read for this alert
+        try {
+            const { markNotificationsReadForAlert } = require("../services/notificationService");
+            await markNotificationsReadForAlert(alert._id);
+        } catch (err) {
+            console.log("Error clearing alert notifications on resolve:", err.message);
         }
 
         res.status(200).json({

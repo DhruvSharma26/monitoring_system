@@ -408,11 +408,65 @@ const resetStaffPassword = async (req, res) => {
     }
 };
 
+const updateStaffGalleryAccess = async (req, res) => {
+    try {
+        const { email, allowGalleryUpload } = req.body;
+
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                message: "Staff email address is required"
+            });
+        }
+
+        const normalizedEmail = email.toLowerCase().trim();
+        const staff = await User.findOne({ email: normalizedEmail, role: "staff" });
+
+        if (!staff) {
+            return res.status(404).json({
+                success: false,
+                message: "Staff member with this email address not found"
+            });
+        }
+
+        // Verify ownership (or match adminId)
+        let isOwnerAdmin = staff.adminId && staff.adminId.toString() === req.user.id.toString();
+        if (!isOwnerAdmin && staff.assignedDevice) {
+            const device = await Device.findOne({ _id: staff.assignedDevice, adminId: req.user.id });
+            if (device) isOwnerAdmin = true;
+        }
+
+        if (!isOwnerAdmin) {
+            return res.status(403).json({
+                success: false,
+                message: "Unauthorized: You can only modify settings for staff registered under your account"
+            });
+        }
+
+        staff.allowGalleryUpload = Boolean(allowGalleryUpload);
+        await staff.save();
+
+        res.status(200).json({
+            success: true,
+            message: `Gallery upload access ${staff.allowGalleryUpload ? 'enabled' : 'disabled'} for ${staff.email}`,
+            staff
+        });
+
+    } catch (error) {
+        console.error("Error updating staff gallery access:", error);
+        res.status(500).json({
+            success: false,
+            message: error.message || "Server Error"
+        });
+    }
+};
+
 module.exports = {
     registerStaff,
     getStaff,
     deleteStaff,
     sendStaffResetOtp,
     verifyStaffResetOtp,
-    resetStaffPassword
+    resetStaffPassword,
+    updateStaffGalleryAccess
 };

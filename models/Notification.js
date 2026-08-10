@@ -57,7 +57,13 @@ const notificationSchema = new mongoose.Schema(
     }
 },
 {
-    timestamps: true
+    timestamps: true,
+    toJSON: {
+        transform: function(doc, ret) {
+            ret.alertId = ret.alertId || ret.alert || null;
+            return ret;
+        }
+    }
 });
 
 module.exports = mongoose.model("Notification", notificationSchema);

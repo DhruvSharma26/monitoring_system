@@ -217,7 +217,8 @@ const login = async (req, res, next) => {
             contactPerson: user.contactPerson,
             designation: user.designation,
             mobile: user.mobile,
-            assignedDevice: user.assignedDevice
+            assignedDevice: user.assignedDevice,
+            allowGalleryUpload: user.allowGalleryUpload ?? false
         });
 
     } catch (error) {

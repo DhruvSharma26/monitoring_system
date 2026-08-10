@@ -143,6 +143,7 @@ async function sendTaskAssignedNotification(taskDoc, staffUser, adminUser, devic
         const dbNotification = await Notification.create({
             recipient: staffUser._id,
             recipientRole: "staff",
+            alert: taskDoc ? taskDoc.alert : null,
             device_uid: deviceUid,
             device: deviceDoc ? deviceDoc._id : null,
             title: title,
@@ -169,6 +170,7 @@ async function sendTaskAssignedNotification(taskDoc, staffUser, adminUser, devic
                 body: message,
                 data: {
                     taskId: taskDoc._id.toString(),
+                    alertId: taskDoc.alert ? taskDoc.alert.toString() : "",
                     device_uid: deviceUid
                 }
             });
@@ -224,6 +226,7 @@ async function sendTaskSubmittedNotification(taskDoc, staffUser, deviceDoc) {
             const dbNotification = await Notification.create({
                 recipient: adminUser._id,
                 recipientRole: "admin",
+                alert: taskDoc ? taskDoc.alert : null,
                 device_uid: deviceUid,
                 device: deviceDoc ? deviceDoc._id : null,
                 title: title,
@@ -246,6 +249,7 @@ async function sendTaskSubmittedNotification(taskDoc, staffUser, deviceDoc) {
                 body: message,
                 data: {
                     taskId: taskDoc._id.toString(),
+                    alertId: taskDoc.alert ? taskDoc.alert.toString() : "",
                     device_uid: deviceUid
                 }
             });
@@ -272,6 +276,7 @@ async function sendTaskVerifiedNotification(taskDoc, staffUser, adminUser, devic
         const dbNotification = await Notification.create({
             recipient: staffUser._id,
             recipientRole: "staff",
+            alert: taskDoc ? taskDoc.alert : null,
             device_uid: deviceUid,
             device: deviceDoc ? deviceDoc._id : null,
             title: title,
@@ -298,6 +303,7 @@ async function sendTaskVerifiedNotification(taskDoc, staffUser, adminUser, devic
                 body: message,
                 data: {
                     taskId: taskDoc._id.toString(),
+                    alertId: taskDoc.alert ? taskDoc.alert.toString() : "",
                     device_uid: deviceUid
                 }
             });
@@ -313,9 +319,88 @@ async function sendTaskVerifiedNotification(taskDoc, staffUser, adminUser, devic
     }
 }
 
+/**
+ * Send notification when admin rejects a task.
+ * Notifies ONLY the assigned staff member.
+ */
+async function sendTaskRejectedNotification(taskDoc, staffUser, adminUser, deviceDoc, remarks) {
+    try {
+        if (!staffUser) return;
+
+        const title = "⛔ Task Rejected by Admin";
+        const deviceUid = deviceDoc ? deviceDoc.device_uid : "N/A";
+        const adminDisplayName = (adminUser && (adminUser.name || adminUser.contactPersonName)) ? (adminUser.name || adminUser.contactPersonName) : 'Admin';
+        const reasonText = remarks ? ` Reason: ${remarks}` : "";
+        const message = `Admin ${adminDisplayName} rejected your task submission for device ${deviceUid} (${deviceDoc?.location || ''}).${reasonText}`;
+
+        // Save DB Notification
+        const dbNotification = await Notification.create({
+            recipient: staffUser._id,
+            recipientRole: "staff",
+            alert: taskDoc ? taskDoc.alert : null,
+            device_uid: deviceUid,
+            device: deviceDoc ? deviceDoc._id : null,
+            title: title,
+            message: message,
+            type: "TASK_REJECTED"
+        });
+
+        // Send FCM Push
+        let userTokens = [];
+        if (staffUser.fcmToken) userTokens.push(staffUser.fcmToken);
+        if (Array.isArray(staffUser.fcmTokens)) userTokens.push(...staffUser.fcmTokens);
+        userTokens = Array.from(new Set(userTokens.filter(Boolean)));
+
+        if (userTokens.length > 0) {
+            const adminUsers = await User.find({ role: "admin", $or: [{ fcmToken: { $in: userTokens } }, { fcmTokens: { $in: userTokens } }] }).select("fcmToken fcmTokens").lean();
+            const adminTokensSet = new Set(adminUsers.flatMap(a => [a.fcmToken, ...(a.fcmTokens || [])].filter(Boolean)));
+            userTokens = userTokens.filter(t => !adminTokensSet.has(t));
+        }
+
+        if (userTokens.length > 0) {
+            await sendPushNotification({
+                tokens: userTokens,
+                title: title,
+                body: message,
+                data: {
+                    taskId: taskDoc._id.toString(),
+                    alertId: taskDoc.alert ? taskDoc.alert.toString() : "",
+                    device_uid: deviceUid
+                }
+            });
+        }
+
+        // Targeted Socket emission
+        if (global.io) {
+            global.io.to(`user_${staffUser._id}`).emit("new_notification", dbNotification);
+            global.io.to(`user_${staffUser._id}`).emit("user_notification", dbNotification);
+        }
+    } catch (error) {
+        console.log("❌ sendTaskRejectedNotification Error:", error.message);
+    }
+}
+
+/**
+ * Automatically mark all unread notifications read for a given alertId when the alert is resolved or verified.
+ */
+async function markNotificationsReadForAlert(alertId) {
+    if (!alertId) return;
+    try {
+        await Notification.updateMany({ alert: alertId, read: false }, { read: true });
+        if (global.io) {
+            global.io.emit("alert_notifications_cleared", { alertId: alertId.toString() });
+        }
+        console.log(`🧹 Marked all unread notifications read for alertId: ${alertId}`);
+    } catch (error) {
+        console.log("❌ markNotificationsReadForAlert Error:", error.message);
+    }
+}
+
 module.exports = {
     handleMqttAlertNotification,
     sendTaskAssignedNotification,
     sendTaskSubmittedNotification,
-    sendTaskVerifiedNotification
+    sendTaskVerifiedNotification,
+    sendTaskRejectedNotification,
+    markNotificationsReadForAlert
 };

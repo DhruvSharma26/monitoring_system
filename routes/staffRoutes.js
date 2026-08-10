@@ -11,9 +11,16 @@ const {
     deleteStaff,
     sendStaffResetOtp,
     verifyStaffResetOtp,
-    resetStaffPassword
+    resetStaffPassword,
+    updateStaffGalleryAccess
 } = require(
     "../controllers/staffController"
+);
+
+router.post(
+    "/gallery-access",
+    authMiddleware,
+    updateStaffGalleryAccess
 );
 
 router.post(

@@ -12,6 +12,8 @@ const {
     uploadTaskPhotos,
     submitTask,
     verifyTask,
+    rejectTask,
+    reassignTask,
     completeTask,
     updateTaskProgress
 } = require("../controllers/taskController");
@@ -58,6 +60,12 @@ router.post("/:taskId/submit", submitTask);
 // Admin Verify Task
 router.post("/verify", verifyTask);
 router.post("/:taskId/verify", verifyTask);
+
+// Admin Reject & Reassign Task
+router.post("/reject", rejectTask);
+router.post("/:taskId/reject", rejectTask);
+router.post("/reassign", reassignTask);
+router.post("/:taskId/reassign", reassignTask);
 
 router.post("/:taskId/complete", completeTask);
 router.patch("/:taskId/progress", updateTaskProgress);

@@ -30,10 +30,9 @@ const taskSchema = new mongoose.Schema(
             "ASSIGNED",
             "IN_PROGRESS",
             "SUBMITTED",
-            "COMPLETED",
-            "PENDING_REVIEW",
+            "REJECTED",
             "VERIFIED",
-            "RESOLVED"
+            "COMPLETED"
         ],
         default: "ASSIGNED"
     },

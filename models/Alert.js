@@ -34,6 +34,8 @@ const alertSchema = new mongoose.Schema(
             "OPEN",
             "ASSIGNED",
             "IN_PROGRESS",
+            "REJECTED",
+            "VERIFIED",
             "RESOLVED"
         ],
         default: "OPEN"

@@ -314,26 +314,29 @@ const verifyTask = async (req, res) => {
 
         await task.save();
 
-        // Mark associated Alert as RESOLVED in DB with resolvedAt timestamp
+        // Mark associated Alert as VERIFIED in DB with resolvedAt timestamp
         if (task.alert) {
             const Alert = require("../models/Alert");
-            await Alert.findByIdAndUpdate(task.alert, { status: "RESOLVED", resolvedAt: now });
+            await Alert.findByIdAndUpdate(task.alert, { status: "VERIFIED", resolvedAt: now });
         }
 
         broadcastTaskUpdate(task);
         if (global.io) {
-            global.io.emit("new_alert", { alertId: task.alert, status: "RESOLVED", taskId: task._id });
+            global.io.emit("new_alert", { alertId: task.alert, status: "VERIFIED", taskId: task._id });
         }
 
-        // Trigger notification to staff
+        // Trigger notification to staff & clear alert notifications
         try {
             const staff = await User.findById(task.staff);
             const device = await Device.findById(task.device);
             const admin = await User.findById(req.user.id);
             const notificationService = require("../services/notificationService");
             notificationService.sendTaskVerifiedNotification(task, staff, admin, device);
+            if (task.alert) {
+                await notificationService.markNotificationsReadForAlert(task.alert);
+            }
         } catch (err) {
-            console.log("Error sending task verification notification:", err.message);
+            console.log("Error sending task verification notification / clearing alert notifications:", err.message);
         }
 
         res.status(200).json({
@@ -344,6 +347,131 @@ const verifyTask = async (req, res) => {
         });
     } catch (error) {
         console.log(error);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+};
+
+// Admin Rejects Task
+const rejectTask = async (req, res) => {
+    try {
+        const { taskId, remarks } = req.body;
+        const id = taskId || req.params.taskId;
+        const task = await Task.findById(id);
+
+        if (!task) {
+            return res.status(404).json({ success: false, message: "Task not found" });
+        }
+
+        const now = new Date();
+        task.status = "REJECTED";
+        task.adminRemarks = remarks || "Rejected by admin";
+        task.progressPercent = 0;
+
+        task.timeline.push({
+            status: "REJECTED",
+            timestamp: now,
+            updatedBy: req.user ? req.user.id : null,
+            notes: remarks ? `Rejected by admin: ${remarks}` : "Task rejected by admin"
+        });
+
+        await task.save();
+
+        if (task.alert) {
+            const Alert = require("../models/Alert");
+            await Alert.findByIdAndUpdate(task.alert, { status: "REJECTED" });
+        }
+
+        broadcastTaskUpdate(task);
+        if (global.io) {
+            global.io.emit("new_alert", { alertId: task.alert, status: "REJECTED", taskId: task._id });
+        }
+
+        try {
+            const staff = await User.findById(task.staff);
+            const device = await Device.findById(task.device);
+            const admin = await User.findById(req.user ? req.user.id : null);
+            const notificationService = require("../services/notificationService");
+            await notificationService.sendTaskRejectedNotification(task, staff, admin, device, remarks);
+        } catch (err) {
+            console.log("Error sending task rejection notification:", err.message);
+        }
+
+        res.status(200).json({
+            success: true,
+            message: "Task Rejected Successfully",
+            task
+        });
+    } catch (error) {
+        console.log("Error rejecting task:", error);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+};
+
+// Admin Reassigns Task
+const reassignTask = async (req, res) => {
+    try {
+        const { taskId, staffId, notes } = req.body;
+        const id = taskId || req.params.taskId;
+        const task = await Task.findById(id);
+
+        if (!task) {
+            return res.status(404).json({ success: false, message: "Task not found" });
+        }
+
+        if (!staffId) {
+            return res.status(400).json({ success: false, message: "Staff ID is required for reassignment" });
+        }
+
+        const isObjectId = mongoose.Types.ObjectId.isValid(staffId);
+        let staff = isObjectId ? await User.findOne({ _id: staffId, role: "staff" }) : null;
+        if (!staff) {
+            staff = await User.findOne({ $or: [{ userId: staffId }, { email: staffId }], role: "staff" });
+        }
+
+        if (!staff) {
+            return res.status(404).json({ success: false, message: "Staff member not found" });
+        }
+
+        const now = new Date();
+        task.staff = staff._id;
+        task.status = "ASSIGNED";
+        task.progressPercent = 0;
+        task.assignedAt = now;
+        task.assignedBy = req.user ? req.user.id : null;
+        if (notes) task.notes = notes;
+
+        task.timeline.push({
+            status: "REASSIGNED",
+            timestamp: now,
+            updatedBy: req.user ? req.user.id : null,
+            notes: `Reassigned to ${staff.name || staff.userId}`
+        });
+
+        await task.save();
+
+        if (task.alert) {
+            const Alert = require("../models/Alert");
+            await Alert.findByIdAndUpdate(task.alert, { status: "ASSIGNED" });
+        }
+
+        const device = task.device ? await Device.findById(task.device) : null;
+
+        try {
+            const notificationService = require("../services/notificationService");
+            notificationService.sendTaskAssignedNotification(task, staff, req.user, device);
+        } catch (err) {
+            console.log("Error sending task reassignment notification:", err.message);
+        }
+
+        broadcastTaskUpdate(task);
+
+        res.status(200).json({
+            success: true,
+            message: "Task Reassigned Successfully",
+            task
+        });
+    } catch (error) {
+        console.log("Error reassigning task:", error);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 };
@@ -552,6 +680,8 @@ module.exports = {
     uploadTaskPhotos,
     submitTask,
     verifyTask,
+    rejectTask,
+    reassignTask,
     getMyTasks,
     getAllTasksForAdmin,
     getTaskTimeline,

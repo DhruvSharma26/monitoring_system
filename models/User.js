@@ -68,7 +68,12 @@ const userSchema = new mongoose.Schema(
 
     fcmTokens: [{
         type: String
-    }]
+    }],
+
+    allowGalleryUpload: {
+        type: Boolean,
+        default: false
+    }
 },
 {
     timestamps: true
