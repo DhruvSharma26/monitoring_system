@@ -453,6 +453,7 @@ const getMyTasks = async (req, res) => {
         }
 
         const tasks = await Task.find(query)
+            .populate("alert")
             .populate("device")
             .populate("staff", "name empId userId email")
             .sort({ createdAt: -1 });
@@ -478,6 +479,7 @@ const getAllTasksForAdmin = async (req, res) => {
             .populate("staff", "name empId email")
             .populate("device", "deviceId location floor device_uid")
             .populate("assignedBy", "name email")
+            .populate("alert")
             .sort({ createdAt: -1 });
 
         res.status(200).json({
@@ -497,6 +499,7 @@ const getTaskTimeline = async (req, res) => {
         const task = await Task.findById(req.params.taskId)
             .populate("staff", "name empId email")
             .populate("device", "deviceId location floor device_uid")
+            .populate("alert")
             .populate("timeline.updatedBy", "name role");
 
         if (!task) {

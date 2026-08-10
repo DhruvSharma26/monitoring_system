@@ -471,6 +471,7 @@ const assignAlert = async (req, res) => {
         const task = await Task.create({
             alert: alert._id,
             taskName: taskName || alert.title || "Restroom Cleaning & Hygiene Task",
+            title: taskName || alert.title || "Restroom Cleaning & Hygiene Task",
             device: device ? device._id : null,
             staff: staff._id,
             assignedBy: req.user ? req.user.id : null,

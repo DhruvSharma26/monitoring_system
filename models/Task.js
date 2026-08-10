@@ -2,6 +2,8 @@ const mongoose = require("mongoose");
 
 const taskSchema = new mongoose.Schema(
 {
+    taskName: { type: String, default: "" },
+    title: { type: String, default: "" },
     alert: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Alert"
