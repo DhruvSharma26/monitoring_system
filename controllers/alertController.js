@@ -107,6 +107,7 @@ const getAlerts = async (req, res) => {
             }
         }
 
+        const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
         let alerts = await Alert.find(query).sort({ createdAt: -1 }).lean();
 
         // Fallback: If query returned 0 alerts for admin, fetch all system alerts so screen is not empty
