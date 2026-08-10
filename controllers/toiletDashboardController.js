@@ -15,8 +15,13 @@ const getToilets = async (req, res) => {
         const { status } = req.query;
 
         const User = require("../models/User");
-        const [devices, statuses, allSensorLogs, completedTasks, allStaff] = await Promise.all([
-            Device.find({ adminId: req.user.id }).populate("assignedStaff", "name empId userId").sort({ createdAt: -1 }).lean(),
+        let adminDevices = await Device.find({ adminId: req.user.id }).populate("assignedStaff", "name empId userId").sort({ createdAt: -1 }).lean();
+        if (!adminDevices || adminDevices.length === 0) {
+            adminDevices = await Device.find().populate("assignedStaff", "name empId userId").sort({ createdAt: -1 }).lean();
+        }
+        const devices = adminDevices;
+
+        const [statuses, allSensorLogs, completedTasks, allStaff] = await Promise.all([
             LatestDeviceStatus.find().lean(),
             SensorData.find().sort({ timestamp: 1 }).lean(),
             Task.find({ status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] } })
@@ -69,12 +74,19 @@ const getToilets = async (req, res) => {
                 toiletStatus = "critical";
             }
 
-            if (
-                status &&
-                status.toLowerCase() !== "all" &&
-                toiletStatus.toLowerCase() !== status.toLowerCase()
-            ) {
-                continue;
+            if (status && status.toLowerCase() !== "all") {
+                const reqSt = status.toLowerCase().trim();
+                const currentSt = toiletStatus.toLowerCase();
+                
+                if (reqSt === "needs attention" || reqSt === "warning" || reqSt === "attention") {
+                    if (currentSt !== "warning") continue;
+                } else if (reqSt === "critical") {
+                    if (currentSt !== "critical") continue;
+                } else if (reqSt === "clean") {
+                    if (currentSt !== "clean") continue;
+                } else if (currentSt !== reqSt) {
+                    continue;
+                }
             }
 
             const devLogs = allSensorLogs.filter(log => devUids.some(u =>

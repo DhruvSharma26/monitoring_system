@@ -45,15 +45,22 @@ const getDashboard = async (req, res) => {
                 }
             }
 
-            if (!item || item.feedback === 1 || item.feedback === 2) {
-                clean++;
-                totalRating += 5.0;
-            } else if (item.feedback === 3) {
-                attention++;
-                totalRating += 2.5;
-            } else if (item.feedback === 4) {
+            let toiletStatus = "clean";
+            if (item) {
+                if (item.feedback === 3 || (item.OdorSensVal || 0) >= 50) {
+                    toiletStatus = "warning";
+                }
+                if (item.feedback === 4 || (item.OdorSensVal || 0) >= 80) {
+                    toiletStatus = "critical";
+                }
+            }
+
+            if (toiletStatus === "critical") {
                 critical++;
                 totalRating += 1.0;
+            } else if (toiletStatus === "warning") {
+                attention++;
+                totalRating += 2.5;
             } else {
                 clean++;
                 totalRating += 5.0;
