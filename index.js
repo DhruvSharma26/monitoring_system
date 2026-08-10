@@ -53,6 +53,26 @@ const io = new Server(server, {
 });
 global.io = io; // Make io globally accessible
 
+io.on("connection", (socket) => {
+  console.log(`🔌 Socket Connected: ${socket.id}`);
+
+  socket.on("join", (userId) => {
+    if (userId) {
+      const room = userId.startsWith("user_") ? userId : `user_${userId}`;
+      socket.join(room);
+      console.log(`🔌 Socket ${socket.id} joined room ${room}`);
+    }
+  });
+
+  socket.on("join_room", (room) => {
+    if (room) {
+      const formattedRoom = room.startsWith("user_") ? room : `user_${room}`;
+      socket.join(formattedRoom);
+      console.log(`🔌 Socket ${socket.id} joined room ${formattedRoom}`);
+    }
+  });
+});
+
 app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());

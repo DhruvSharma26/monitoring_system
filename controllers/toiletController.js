@@ -332,6 +332,8 @@ const postToiletTelemetry = async (req, res) => {
 
         if (alertType) {
             const alertService = require("../services/alertService");
+            const notificationService = require("../services/notificationService");
+
             const { alert: alertDoc, isOverwritten } = await alertService.processOrCreateDeviceAlert({
                 device_uid: device.device_uid,
                 deviceId: device.deviceId,
@@ -341,14 +343,23 @@ const postToiletTelemetry = async (req, res) => {
                 OdorSensVal: sensorPayload.OdorSensVal
             });
 
+            // Dispatch targeted notifications (DB, FCM Push, Sockets) ONLY to admin who registered device & assigned staff
+            await notificationService.handleMqttAlertNotification(sensorPayload, alertType, alertDoc);
+
             if (global.io) {
-                global.io.emit("new_alert", {
+                const socketPayload = {
                     device_uid: device.device_uid,
                     alert_id: alertDoc._id,
                     type: alertType,
                     feedback: sensorPayload.feedback,
                     isOverwritten
-                });
+                };
+                if (device.adminId) {
+                    global.io.to(`user_${device.adminId}`).emit("new_alert", socketPayload);
+                }
+                if (device.assignedStaff) {
+                    global.io.to(`user_${device.assignedStaff}`).emit("new_alert", socketPayload);
+                }
             }
         }
 

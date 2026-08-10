@@ -69,7 +69,7 @@ const getAlerts = async (req, res) => {
 
             myDevices = await Device.find({
                 $or: devConditions
-            }).select("device_uid deviceId location floor").lean();
+            }).select("_id device_uid deviceId location floor").lean();
 
             if (myDevices.length === 0) {
                 return res.status(200).json({ success: true, count: 0, alerts: [] });
@@ -79,8 +79,14 @@ const getAlerts = async (req, res) => {
             if (staffCreationTime > 0) {
                 query.createdAt = { $gte: new Date(staffCreationTime) };
             }
+        } else if (req.user && req.user.role === 'admin') {
+            myDevices = await Device.find({ adminId: req.user.id }).select("_id device_uid deviceId location floor").lean();
+
+            if (myDevices.length === 0) {
+                return res.status(200).json({ success: true, count: 0, alerts: [] });
+            }
         } else {
-            myDevices = await Device.find().select("device_uid deviceId location floor").lean();
+            myDevices = await Device.find().select("_id device_uid deviceId location floor").lean();
         }
 
         const deviceMap = {};
@@ -89,26 +95,19 @@ const getAlerts = async (req, res) => {
             if (d.deviceId) deviceMap[d.deviceId.toLowerCase()] = d;
         });
 
-        if (req.user && req.user.role === 'staff') {
+        if (req.user && (req.user.role === 'staff' || req.user.role === 'admin')) {
             const allDeviceUids = myDevices.flatMap(d => [d.device_uid, d.deviceId, d._id ? d._id.toString() : null].filter(Boolean));
             if (allDeviceUids.length > 0) {
                 const regexUids = allDeviceUids.map(u => new RegExp(`^${u.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'));
                 query.$or = [
                     { device_uid: { $in: regexUids } },
-                    { deviceId: { $in: regexUids } }
+                    { deviceId: { $in: regexUids } },
+                    { device: { $in: myDevices.map(d => d._id) } }
                 ];
             }
         }
 
-        const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
         let alerts = await Alert.find(query).sort({ createdAt: -1 }).lean();
-
-        // Fallback: If query returned 0 alerts and user is admin/system, fetch all system alerts
-        if (alerts.length === 0 && (!req.user || req.user.role !== 'staff')) {
-            const fallbackQuery = { ...query };
-            delete fallbackQuery.$or;
-            alerts = await Alert.find(fallbackQuery).sort({ createdAt: -1 }).lean();
-        }
 
         // Bulk fetch all tasks
         const allTasks = await Task.find().populate("staff", "name empId userId").sort({ createdAt: -1 }).lean();
