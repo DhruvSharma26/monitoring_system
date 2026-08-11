@@ -232,6 +232,13 @@ const submitTask = async (req, res) => {
             return res.status(404).json({ success: false, message: "Task not found" });
         }
 
+        if (task.status === "REJECTED") {
+            return res.status(400).json({
+                success: false,
+                message: "This task was rejected by Admin. Please wait for Admin to reassign the task before submitting."
+            });
+        }
+
         if (!task.startedAt) {
             return res.status(400).json({
                 success: false,
@@ -433,6 +440,9 @@ const reassignTask = async (req, res) => {
         }
 
         const now = new Date();
+        const prevStaffId = task.staff ? task.staff.toString() : null;
+        const isSameStaff = prevStaffId ? (prevStaffId === staff._id.toString()) : false;
+
         task.staff = staff._id;
         task.status = "ASSIGNED";
         task.progressPercent = 0;
@@ -444,6 +454,9 @@ const reassignTask = async (req, res) => {
             status: "REASSIGNED",
             timestamp: now,
             updatedBy: req.user ? req.user.id : null,
+            prevStaff: prevStaffId,
+            newStaff: staff._id.toString(),
+            isSameStaff: isSameStaff,
             notes: `Reassigned to ${staff.name || staff.userId}`
         });
 
