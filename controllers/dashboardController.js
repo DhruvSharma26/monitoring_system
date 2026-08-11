@@ -59,14 +59,20 @@ const getDashboard = async (req, res) => {
                 const isToday = Boolean(itemDateStr && itemDateStr === todayDateStr);
 
                 if (isToday) {
-                    const odor = Number(item.OdorSensVal) || 0;
-                    const counter = Number(item.Counter) || 0;
+                    const { classifyTelemetry } = require("../services/alertClassifier");
+                    const classification = classifyTelemetry(
+                        item.feedback,
+                        item.Counter,
+                        item.OdorSensVal,
+                        userSettings
+                    );
 
-                    if (item.feedback === 3 || odor >= warningOdorThreshold || counter >= warningCounterThreshold) {
+                    if (classification.status === "NEEDS_ATTENTION") {
                         toiletStatus = "warning";
-                    }
-                    if (item.feedback === 4 || odor >= odorThreshold || counter >= counterThreshold) {
+                    } else if (classification.status === "CRITICAL") {
                         toiletStatus = "critical";
+                    } else {
+                        toiletStatus = "clean";
                     }
                 }
             }

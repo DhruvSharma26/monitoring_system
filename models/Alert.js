@@ -15,12 +15,28 @@ const alertSchema = new mongoose.Schema(
     alertType: {
         type: String,
         enum: [
+            "NEEDS_ATTENTION",
+            "CRITICAL",
             "HIGH_USAGE",
             "HIGH_ODOR",
             "CRITICAL_FEEDBACK",
             "WARNING_FEEDBACK"
         ]
     },
+
+    alertSubtype: {
+        type: String,
+        enum: ["NA_1", "NA_2", "NA_3", "C_1", "C_2", "C_3", "C_4"]
+    },
+
+    rating: Number,
+
+    toiletStatus: {
+        type: String,
+        enum: ["CLEAN", "NEEDS_ATTENTION", "CRITICAL"]
+    },
+
+    description: String,
 
     feedback: Number,
 

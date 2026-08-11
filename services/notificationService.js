@@ -60,12 +60,10 @@ async function handleMqttAlertNotification(sensorPayload, alertType, alertDoc) {
         const humanAlertType = alertType.replace(/_/g, " ");
         const title = `🚨 Alert Triggered: ${humanAlertType}`;
         const locationText = device ? `Location: ${device.location || 'N/A'}, Floor: ${device.floor || 'N/A'}` : `Device: ${deviceUid}`;
-        const feedbackText = sensorPayload.feedback !== undefined ? `Feedback Rating: ${sensorPayload.feedback}` : '';
-        const odorText = sensorPayload.OdorSensVal !== undefined ? `Odor Level: ${sensorPayload.OdorSensVal}` : '';
-        const counterText = sensorPayload.Counter !== undefined ? `Counter: ${sensorPayload.Counter}` : '';
+        const ratingText = (alertDoc && alertDoc.rating != null) ? `Rating: ${alertDoc.rating} ★` : '';
+        const descText = (alertDoc && alertDoc.description) ? alertDoc.description : `Alert [${humanAlertType}] created for device ${deviceUid}.`;
         
-        const details = [locationText, feedbackText, odorText, counterText].filter(Boolean).join(" | ");
-        const message = `Alert [${humanAlertType}] created for device ${deviceUid}. (${details})`;
+        const message = [ratingText, locationText, descText].filter(Boolean).join(" | ");
 
         // 4. Dispatch Notifications ONLY to targeted Recipients (Device Admin & Assigned Staff)
         for (const user of recipients) {

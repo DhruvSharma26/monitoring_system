@@ -37,7 +37,7 @@ const processOrCreateDeviceAlert = async (alertData) => {
 
 const processOrCreateDeviceAlertInternal = async (alertData) => {
     try {
-        const { device_uid, deviceId, alertType, feedback, Counter, OdorSensVal } = alertData;
+        const { device_uid, deviceId, alertType, alertSubtype, rating, toiletStatus, description, feedback, Counter, OdorSensVal } = alertData;
         const devUid = device_uid || deviceId;
         if (!devUid) return null;
 
@@ -83,6 +83,10 @@ const processOrCreateDeviceAlertInternal = async (alertData) => {
         if (existingUnassignedAlert) {
             // SCENARIO 1: Overwrite existing Not Assigned alert with latest parameters
             existingUnassignedAlert.alertType = alertType || existingUnassignedAlert.alertType;
+            if (alertSubtype !== undefined) existingUnassignedAlert.alertSubtype = alertSubtype;
+            if (rating !== undefined) existingUnassignedAlert.rating = rating;
+            if (toiletStatus !== undefined) existingUnassignedAlert.toiletStatus = toiletStatus;
+            if (description !== undefined) existingUnassignedAlert.description = description;
             if (feedback !== undefined) existingUnassignedAlert.feedback = feedback;
             if (Counter !== undefined) existingUnassignedAlert.Counter = Counter;
             if (OdorSensVal !== undefined) existingUnassignedAlert.OdorSensVal = OdorSensVal;
@@ -92,13 +96,17 @@ const processOrCreateDeviceAlertInternal = async (alertData) => {
 
             resultAlert = existingUnassignedAlert;
             isOverwritten = true;
-            console.log(`🔄 Overwrote Not Assigned alert for device ${targetUid}: ${alertType}`);
+            console.log(`🔄 Overwrote Not Assigned alert for device ${targetUid}: ${alertType} (${alertSubtype})`);
         } else {
             // SCENARIO 2: Existing alert was Assigned (or no alert exists) -> Create new Not Assigned alert
             resultAlert = await Alert.create({
                 device_uid: targetUid,
                 device: device ? device._id : null,
                 alertType: alertType,
+                alertSubtype: alertSubtype,
+                rating: rating,
+                toiletStatus: toiletStatus,
+                description: description,
                 feedback: feedback !== undefined ? feedback : 0,
                 Counter: Counter !== undefined ? Counter : 0,
                 OdorSensVal: OdorSensVal !== undefined ? OdorSensVal : 0,
@@ -106,7 +114,7 @@ const processOrCreateDeviceAlertInternal = async (alertData) => {
             });
 
             isOverwritten = false;
-            console.log(`🚨 Created NEW Not Assigned alert for device ${targetUid}: ${alertType}`);
+            console.log(`🚨 Created NEW Not Assigned alert for device ${targetUid}: ${alertType} (${alertSubtype})`);
         }
 
         return { alert: resultAlert, device, isOverwritten };

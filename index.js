@@ -305,30 +305,33 @@ function connectMQTT() {
         }
 
         // 2. Evaluate Alerts & Thresholds for Current-Day Events
-        const settings = await Settings.findOne() || { counterThreshold: 100, odorThreshold: 80 };
-        
-        let alertType = null;
-        let alertMessage = "";
+        const targetDev = await Device.findOne({
+          $or: [{ device_uid: sensorPayload.device_uid }, { deviceId: sensorPayload.device_uid }]
+        });
 
-        if (sensorPayload.feedback === 4) {
-          alertType = "CRITICAL_FEEDBACK";
-          alertMessage = "Critical";
-        } else if (sensorPayload.feedback === 3) {
-          alertType = "WARNING_FEEDBACK";
-          alertMessage = "Needs Attention";
-        } else if (sensorPayload.OdorSensVal > settings.odorThreshold) {
-          alertType = "HIGH_ODOR";
-          alertMessage = "High Odor Value";
-        } else if (sensorPayload.Counter > settings.counterThreshold) {
-          alertType = "HIGH_USAGE";
-          alertMessage = "High Counter Value";
-        }
+        const adminSettings = (targetDev && targetDev.adminId)
+          ? await Settings.findOne({ adminId: targetDev.adminId })
+          : await Settings.findOne();
 
-        if (alertType) {
+        const settings = adminSettings || { counterThreshold: 100, odorThreshold: 80 };
+
+        const { classifyTelemetry } = require("./services/alertClassifier");
+        const classification = classifyTelemetry(
+          sensorPayload.feedback,
+          sensorPayload.Counter,
+          sensorPayload.OdorSensVal,
+          settings
+        );
+
+        if (classification.status !== "CLEAN" && classification.alertType) {
           const alertService = require("./services/alertService");
           const { alert: alertDoc, device: dev, isOverwritten } = await alertService.processOrCreateDeviceAlert({
             device_uid: sensorPayload.device_uid,
-            alertType: alertType,
+            alertType: classification.alertType,
+            alertSubtype: classification.alertSubtype,
+            rating: classification.rating,
+            toiletStatus: classification.status,
+            description: classification.description,
             feedback: sensorPayload.feedback,
             Counter: sensorPayload.Counter,
             OdorSensVal: sensorPayload.OdorSensVal
@@ -337,23 +340,25 @@ function connectMQTT() {
           const alertSocketData = {
             device_uid: sensorPayload.device_uid,
             alert_id: alertDoc._id,
-            type: alertType,
-            message: alertMessage,
+            type: classification.alertType,
+            alertSubtype: classification.alertSubtype,
+            rating: classification.rating,
+            status: classification.status,
+            description: classification.description,
+            message: classification.description,
             feedback: sensorPayload.feedback,
             isOverwritten: isOverwritten
           };
 
-          const targetDev = dev || await Device.findOne({
-            $or: [{ device_uid: sensorPayload.device_uid }, { deviceId: sensorPayload.device_uid }]
-          });
+          const finalDev = dev || targetDev;
 
           if (global.io) {
             global.io.emit("new_alert", alertSocketData);
-            if (targetDev && targetDev.adminId) {
-              global.io.to(`user_${targetDev.adminId}`).emit("new_alert", alertSocketData);
+            if (finalDev && finalDev.adminId) {
+              global.io.to(`user_${finalDev.adminId}`).emit("new_alert", alertSocketData);
             }
-            if (targetDev && targetDev.assignedStaff) {
-              global.io.to(`user_${targetDev.assignedStaff}`).emit("new_alert", alertSocketData);
+            if (finalDev && finalDev.assignedStaff) {
+              global.io.to(`user_${finalDev.assignedStaff}`).emit("new_alert", alertSocketData);
             }
           }
 

@@ -63,11 +63,21 @@ const getToiletDetails = async (req, res) => {
             const latestDateStr = new Date(latestStatus.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
             const todayDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
             if (latestDateStr === todayDateStr) {
-                const odor = Number(latestStatus.OdorSensVal) || 0;
-                const counter = Number(latestStatus.Counter) || 0;
+                const { classifyTelemetry } = require("../services/alertClassifier");
+                const classification = classifyTelemetry(
+                    latestStatus.feedback,
+                    latestStatus.Counter,
+                    latestStatus.OdorSensVal,
+                    userSettings
+                );
 
-                if (latestStatus.feedback === 3 || odor >= warningOdorThreshold || counter >= warningCounterThreshold) status = "warning";
-                if (latestStatus.feedback === 4 || odor >= odorThreshold || counter >= counterThreshold) status = "critical";
+                if (classification.status === "NEEDS_ATTENTION") {
+                    status = "warning";
+                } else if (classification.status === "CRITICAL") {
+                    status = "critical";
+                } else {
+                    status = "clean";
+                }
             }
         }
 

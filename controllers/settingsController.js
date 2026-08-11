@@ -62,11 +62,19 @@ const updateThresholds =
 
 const getThresholds = async (req, res) => {
     try {
-        let settings = await Settings.findOne({ adminId: req.user.id });
-        if (!settings) {
-            settings = { counterThreshold: 100, odorThreshold: 80 }; // defaults
-        }
-        res.status(200).json({ success: true, settings });
+        let settingsDoc = await Settings.findOne({ adminId: req.user.id });
+        const counterVal = settingsDoc?.counterThreshold || 100;
+        const odorVal = settingsDoc?.odorThreshold || 80;
+
+        const settingsObj = {
+            adminId: req.user.id,
+            counterThreshold: counterVal,
+            odorThreshold: odorVal,
+            counterWarningThreshold: counterVal * 0.5,
+            odorWarningThreshold: odorVal * 0.5
+        };
+
+        res.status(200).json({ success: true, settings: settingsObj });
     } catch (error) {
         console.log(error);
         res.status(500).json({ success: false, message: "Server Error" });
