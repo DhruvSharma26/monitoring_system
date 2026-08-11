@@ -199,17 +199,36 @@ const getToiletDetails = async (req, res) => {
             averageRating = feedbackToRating(latestStatus.feedback);
         }
 
-        let totalUsage = Number(latestStatus?.Counter) || 0;
-        let currentCounter = Number(latestStatus?.Counter) || 0;
-        let currentOdor = Number(latestStatus?.OdorSensVal) || 0;
+        const latestDateStr = latestStatus && latestStatus.timestamp ? new Date(latestStatus.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : null;
+        const todayDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+        const isLatestToday = Boolean(latestDateStr && latestDateStr === todayDateStr);
 
-        for (const l of last7DaysSensorLogs) {
-            const c = Number(l.Counter) || 0;
-            if (c > totalUsage) totalUsage = c;
-            if (c > currentCounter) currentCounter = c;
-            const o = Number(l.OdorSensVal) || 0;
-            if (o > currentOdor) currentOdor = o;
+        let currentCounter = isLatestToday ? (Number(latestStatus?.Counter) || 0) : 0;
+        let currentOdor = isLatestToday ? (Number(latestStatus?.OdorSensVal) || 0) : 0;
+        let currentFeedback = isLatestToday ? (latestStatus?.feedback || 1) : 1;
+
+        // Filter sensor logs strictly for today's date in IST
+        const todaySensorLogs = last7DaysSensorLogs.filter(l => {
+            const lDateStr = l.timestamp ? new Date(l.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : null;
+            return lDateStr && lDateStr === todayDateStr;
+        });
+
+        if (todaySensorLogs.length > 0) {
+            const maxTodayCounter = Math.max(...todaySensorLogs.map(l => Number(l.Counter) || 0));
+            if (maxTodayCounter > currentCounter) currentCounter = maxTodayCounter;
+
+            const maxTodayOdor = Math.max(...todaySensorLogs.map(l => Number(l.OdorSensVal) || 0));
+            if (maxTodayOdor > currentOdor) currentOdor = maxTodayOdor;
         }
+
+        let totalUsage = currentCounter;
+
+        const liveSensorObj = {
+            Counter: currentCounter,
+            OdorSensVal: currentOdor,
+            feedback: currentFeedback,
+            timestamp: isLatestToday ? latestStatus.timestamp : new Date()
+        };
 
         res.status(200).json({
             success: true,
@@ -217,11 +236,7 @@ const getToiletDetails = async (req, res) => {
             status,
             averageRating,
             totalUsage,
-            latestSensor: latestStatus || {
-                Counter: currentCounter,
-                OdorSensVal: currentOdor,
-                feedback: latestStatus?.feedback || 1
-            },
+            latestSensor: liveSensorObj,
             currentCounter: currentCounter,
             currentOdor: currentOdor,
             lastCleanedByStaff,
