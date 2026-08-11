@@ -104,14 +104,20 @@ const getAlerts = async (req, res) => {
                 ];
             }
         } else if (req.user && req.user.role === 'admin') {
-            myDevices = await Device.find({
-                $or: [
-                    { adminId: req.user.id },
-                    { adminId: null },
-                    { adminId: { $exists: false } }
-                ]
-            }).select("_id device_uid deviceId location floor").lean();
+            // First, find devices registered directly by this admin
+            myDevices = await Device.find({ adminId: req.user.id }).select("_id device_uid deviceId location floor").lean();
 
+            // Fallback: If this admin has no registered devices, include unassigned/demo devices
+            if (myDevices.length === 0) {
+                myDevices = await Device.find({
+                    $or: [
+                        { adminId: null },
+                        { adminId: { $exists: false } }
+                    ]
+                }).select("_id device_uid deviceId location floor").lean();
+            }
+
+            // Ultimate Fallback if still empty
             if (myDevices.length === 0) {
                 myDevices = await Device.find().select("_id device_uid deviceId location floor").lean();
             }
@@ -132,10 +138,7 @@ const getAlerts = async (req, res) => {
                 query.$or = [
                     { device_uid: { $in: regexUids } },
                     { deviceId: { $in: regexUids } },
-                    { device: { $in: myDevices.map(d => d._id) } },
-                    { status: "OPEN" },
-                    { device: null },
-                    { device: { $exists: false } }
+                    { device: { $in: myDevices.map(d => d._id) } }
                 ];
             }
         }
