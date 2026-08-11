@@ -47,15 +47,12 @@ const getAlerts = async (req, res) => {
         // Filter alerts by user role (admin devices vs staff assigned devices)
         let myDevices = [];
         let staffUserObj = null;
-        let staffCreationTime = 0;
 
         if (req.user && req.user.role === 'staff') {
             staffUserObj = await User.findById(req.user.id);
             if (!staffUserObj) {
                 return res.status(200).json({ success: true, count: 0, alerts: [] });
             }
-
-            staffCreationTime = getObjectCreationTime(staffUserObj);
 
             const assignedDevId = staffUserObj.assignedDevice;
             const devConditions = [
@@ -67,17 +64,44 @@ const getAlerts = async (req, res) => {
                 devConditions.push({ deviceId: assignedDevId });
             }
 
+            // Include devices linked to tasks or alerts directly assigned to this staff member
+            const staffTasks = await Task.find({ staff: staffUserObj._id }).select("device device_uid deviceId").lean();
+            const staffAlerts = await Alert.find({ assignedStaff: staffUserObj._id }).select("device_uid deviceId").lean();
+
+            staffTasks.forEach(t => {
+                if (t.device) devConditions.push({ _id: t.device });
+                if (t.device_uid) devConditions.push({ device_uid: t.device_uid });
+                if (t.deviceId) devConditions.push({ deviceId: t.deviceId });
+            });
+
+            staffAlerts.forEach(a => {
+                if (a.device_uid) devConditions.push({ device_uid: a.device_uid });
+                if (a.deviceId) devConditions.push({ deviceId: a.deviceId });
+            });
+
             myDevices = await Device.find({
                 $or: devConditions
             }).select("_id device_uid deviceId location floor").lean();
 
-            if (myDevices.length === 0) {
-                return res.status(200).json({ success: true, count: 0, alerts: [] });
-            }
+            const allDeviceUids = [
+                ...myDevices.flatMap(d => [d.device_uid, d.deviceId, d._id ? d._id.toString() : null].filter(Boolean)),
+                ...staffTasks.flatMap(t => [t.device_uid, t.deviceId, t.device ? t.device.toString() : null].filter(Boolean)),
+                ...staffAlerts.flatMap(a => [a.device_uid, a.deviceId].filter(Boolean))
+            ];
 
-            // Filter alerts created ONLY after staff member registration timestamp!
-            if (staffCreationTime > 0) {
-                query.createdAt = { $gte: new Date(staffCreationTime) };
+            const uniqueUids = Array.from(new Set(allDeviceUids));
+
+            if (uniqueUids.length > 0) {
+                const regexUids = uniqueUids.map(u => new RegExp(`^${u.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'));
+                query.$or = [
+                    { device_uid: { $in: regexUids } },
+                    { deviceId: { $in: regexUids } },
+                    { assignedStaff: staffUserObj._id }
+                ];
+            } else {
+                query.$or = [
+                    { assignedStaff: staffUserObj._id }
+                ];
             }
         } else if (req.user && req.user.role === 'admin') {
             myDevices = await Device.find({ adminId: req.user.id }).select("_id device_uid deviceId location floor").lean();
@@ -95,7 +119,7 @@ const getAlerts = async (req, res) => {
             if (d.deviceId) deviceMap[d.deviceId.toLowerCase()] = d;
         });
 
-        if (req.user && (req.user.role === 'staff' || req.user.role === 'admin')) {
+        if (req.user && req.user.role === 'admin') {
             const allDeviceUids = myDevices.flatMap(d => [d.device_uid, d.deviceId, d._id ? d._id.toString() : null].filter(Boolean));
             if (allDeviceUids.length > 0) {
                 const regexUids = allDeviceUids.map(u => new RegExp(`^${u.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'));
@@ -221,6 +245,14 @@ const getAlerts = async (req, res) => {
 
             const devKey = (task.device_uid || task.deviceId || '').toLowerCase();
             const devInfo = deviceMap[devKey];
+
+            // For staff users, only include synthetic alerts for tasks assigned to them or matching their devices
+            if (req.user && req.user.role === 'staff') {
+                const taskStaffId = task.staff ? (task.staff._id ? task.staff._id.toString() : task.staff.toString()) : '';
+                const isMyTask = taskStaffId === req.user.id.toString();
+                const isMyDevice = Boolean(devKey && deviceMap[devKey]);
+                if (!isMyTask && !isMyDevice) continue;
+            }
 
             let photos = [];
             if (Array.isArray(task.cleaningPhotos) && task.cleaningPhotos.length > 0) {
