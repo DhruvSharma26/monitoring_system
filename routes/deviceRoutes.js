@@ -7,10 +7,14 @@ const {
     getDevices,
     getDeviceById,
     geocodeLocation,
+    autocompletePlaces,
+    getPlaceDetails,
     deleteDevice
 } = require("../controllers/deviceController");
 
 router.get("/geocode", authMiddleware, geocodeLocation);
+router.get("/places/autocomplete", authMiddleware, autocompletePlaces);
+router.get("/places/details/:placeId", authMiddleware, getPlaceDetails);
 
 router.post("/", authMiddleware, registerDevice);
 

@@ -123,8 +123,71 @@ const getDistanceMatrix = async (origin, destination) => {
     }
 };
 
+/**
+ * Places Autocomplete (New)
+ */
+const autocompletePlaces = async (input, sessionToken, lat, lng) => {
+    const apiKey = getApiKey();
+    if (!input || !apiKey) return [];
+
+    try {
+        const body = {
+            input: input.trim(),
+            sessionToken: sessionToken || undefined
+        };
+        if (lat != null && lng != null) {
+            body.locationBias = {
+                circle: {
+                    center: { latitude: Number(lat), longitude: Number(lng) },
+                    radius: 50000.0
+                }
+            };
+        }
+
+        const response = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Goog-Api-Key': apiKey
+            },
+            body: JSON.stringify(body)
+        });
+        const data = await response.json();
+        return data.suggestions || [];
+    } catch (error) {
+        console.error("Error in autocompletePlaces:", error);
+        return [];
+    }
+};
+
+/**
+ * Place Details (New)
+ */
+const getPlaceDetails = async (placeId, sessionToken) => {
+    const apiKey = getApiKey();
+    if (!placeId || !apiKey) return null;
+
+    try {
+        const url = `https://places.googleapis.com/v1/places/${placeId}${sessionToken ? `?sessionToken=${sessionToken}` : ''}`;
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'X-Goog-Api-Key': apiKey,
+                'X-Goog-FieldMask': 'id,displayName,formattedAddress,location,primaryType,types'
+            }
+        });
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        console.error("Error in getPlaceDetails:", error);
+        return null;
+    }
+};
+
 module.exports = {
     geocodeAddress,
     reverseGeocode,
-    getDistanceMatrix
+    getDistanceMatrix,
+    autocompletePlaces,
+    getPlaceDetails
 };

@@ -148,6 +148,38 @@ const geocodeLocation = async (req, res) => {
     }
 };
 
+const autocompletePlaces = async (req, res) => {
+    try {
+        const { input, sessionToken, lat, lng } = req.query;
+        if (!input) {
+            return res.status(400).json({ success: false, message: "Input parameter is required" });
+        }
+        const suggestions = await googleMapsService.autocompletePlaces(input, sessionToken, lat, lng);
+        return res.status(200).json({ success: true, suggestions });
+    } catch (error) {
+        console.error("Error in autocompletePlaces controller:", error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+const getPlaceDetails = async (req, res) => {
+    try {
+        const { placeId } = req.params;
+        const { sessionToken } = req.query;
+        if (!placeId) {
+            return res.status(400).json({ success: false, message: "Place ID is required" });
+        }
+        const details = await googleMapsService.getPlaceDetails(placeId, sessionToken);
+        if (!details) {
+            return res.status(404).json({ success: false, message: "Place details not found" });
+        }
+        return res.status(200).json({ success: true, details });
+    } catch (error) {
+        console.error("Error in getPlaceDetails controller:", error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
 const deleteDevice = async (req, res) => {
     try {
         const { id } = req.params;
@@ -194,5 +226,7 @@ module.exports = {
     getDevices,
     getDeviceById,
     geocodeLocation,
+    autocompletePlaces,
+    getPlaceDetails,
     deleteDevice
 };
