@@ -174,6 +174,11 @@ const getAlerts = async (req, res) => {
 
                 alertItem.resolvedAt = task.resolvedAt || task.verifiedAt || alertItem.resolvedAt;
                 alertItem.assignedAt = task.assignedAt;
+                const reassignStep = Array.isArray(task.timeline) ? task.timeline.find(step => step.status === "REASSIGNED") : null;
+                if (reassignStep) {
+                    alertItem.reassignedAt = reassignStep.timestamp;
+                    alertItem.reassignNotes = reassignStep.notes || task.notes || "";
+                }
                 alertItem.startedAt = task.startedAt;
                 alertItem.photosUploadedAt = task.photosUploadedAt;
                 alertItem.submittedAt = task.submittedAt;
@@ -228,6 +233,7 @@ const getAlerts = async (req, res) => {
 
             const isResolved = task.status === "VERIFIED" || task.status === "COMPLETED" || task.status === "RESOLVED";
             const isRejected = task.status === "REJECTED";
+            const synReassignStep = Array.isArray(task.timeline) ? task.timeline.find(step => step.status === "REASSIGNED") : null;
 
             const syntheticAlert = {
                 _id: task._id,
@@ -243,6 +249,8 @@ const getAlerts = async (req, res) => {
                 taskProgressPercent: isResolved ? 100 : (task.progressPercent || 0),
                 taskCleaningPhotos: photos.filter(Boolean),
                 assignedAt: task.assignedAt || task.createdAt,
+                reassignedAt: synReassignStep ? synReassignStep.timestamp : null,
+                reassignNotes: synReassignStep ? synReassignStep.notes : (task.notes || ''),
                 startedAt: task.startedAt,
                 photosUploadedAt: task.photosUploadedAt,
                 submittedAt: task.submittedAt,

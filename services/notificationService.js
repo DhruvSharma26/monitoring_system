@@ -121,6 +121,17 @@ async function handleMqttAlertNotification(sensorPayload, alertType, alertDoc) {
                     createdAt: dbNotification.createdAt
                 };
 
+                const alertSocketPayload = {
+                    device_uid: deviceUid,
+                    alert_id: alertDoc ? alertDoc._id : null,
+                    type: alertType,
+                    message: title,
+                    feedback: sensorPayload.feedback,
+                    Counter: sensorPayload.Counter,
+                    OdorSensVal: sensorPayload.OdorSensVal
+                };
+
+                global.io.to(`user_${user._id}`).emit("new_alert", alertSocketPayload);
                 global.io.to(`user_${user._id}`).emit("new_notification", socketPayload);
                 global.io.to(`user_${user._id}`).emit("user_notification", socketPayload);
             }
