@@ -354,6 +354,7 @@ const postToiletTelemetry = async (req, res) => {
                     feedback: sensorPayload.feedback,
                     isOverwritten
                 };
+                global.io.emit("new_alert", socketPayload);
                 if (device.adminId) {
                     global.io.to(`user_${device.adminId}`).emit("new_alert", socketPayload);
                 }

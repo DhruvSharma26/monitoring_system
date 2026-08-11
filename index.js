@@ -313,6 +313,7 @@ function connectMQTT() {
           });
 
           if (global.io) {
+            global.io.emit("new_alert", alertSocketData);
             if (targetDev && targetDev.adminId) {
               global.io.to(`user_${targetDev.adminId}`).emit("new_alert", alertSocketData);
             }
