@@ -142,12 +142,11 @@ const getToiletDetails = async (req, res) => {
             let dayCounter = 0;
             let dayOdor = 0;
             if (dayLogs.length > 0) {
-                // Calculate total counter for the day (sum of all counter readings for that device on that day)
-                let sumCounter = 0;
+                // Max / Peak counter for the day
                 for (const l of dayLogs) {
-                    sumCounter += Number(l.Counter) || 0;
+                    const c = Number(l.Counter) || 0;
+                    if (c > dayCounter) dayCounter = c;
                 }
-                dayCounter = sumCounter;
 
                 // Average odor
                 let sumOdor = 0;
