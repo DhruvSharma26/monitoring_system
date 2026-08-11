@@ -10,7 +10,32 @@ const Device = require("../models/Device");
  * - If the existing alert/task has already been ASSIGNED, preserve it untouched and create
  *   a new Not Assigned alert for the new alert.
  */
+// In-memory mutex locks per device to prevent race conditions during rapid MQTT messages
+const alertProcessingLocks = new Map();
+
 const processOrCreateDeviceAlert = async (alertData) => {
+    const devUid = alertData.device_uid || alertData.deviceId;
+    if (!devUid) return null;
+
+    const lockKey = devUid.toLowerCase();
+    const existingLock = alertProcessingLocks.get(lockKey) || Promise.resolve();
+
+    let releaseLock;
+    const newLock = new Promise(resolve => { releaseLock = resolve; });
+    alertProcessingLocks.set(lockKey, existingLock.then(() => newLock));
+
+    await existingLock;
+    try {
+        return await processOrCreateDeviceAlertInternal(alertData);
+    } finally {
+        releaseLock();
+        if (alertProcessingLocks.get(lockKey) === newLock) {
+            alertProcessingLocks.delete(lockKey);
+        }
+    }
+};
+
+const processOrCreateDeviceAlertInternal = async (alertData) => {
     try {
         const { device_uid, deviceId, alertType, feedback, Counter, OdorSensVal } = alertData;
         const devUid = device_uid || deviceId;
@@ -28,7 +53,11 @@ const processOrCreateDeviceAlert = async (alertData) => {
 
         // Look for open (unassigned) alerts for this device
         const openAlerts = await Alert.find({
-            $or: [{ device_uid: targetUid }, { deviceId: targetDevId }],
+            $or: [
+                { device_uid: targetUid },
+                { deviceId: targetDevId },
+                ...(device ? [{ device: device._id }] : [])
+            ],
             status: "OPEN"
         }).sort({ createdAt: -1 });
 

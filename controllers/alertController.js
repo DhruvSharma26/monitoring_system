@@ -54,6 +54,7 @@ const getAlerts = async (req, res) => {
                 return res.status(200).json({ success: true, count: 0, alerts: [] });
             }
 
+            // Find devices assigned to this staff member
             const assignedDevId = staffUserObj.assignedDevice;
             const devConditions = [
                 { assignedStaff: staffUserObj._id }
@@ -64,57 +65,68 @@ const getAlerts = async (req, res) => {
                 devConditions.push({ deviceId: assignedDevId });
             }
 
-            // Include devices linked to tasks or alerts directly assigned to this staff member
+            // Also include devices from tasks assigned to this staff
             const staffTasks = await Task.find({ staff: staffUserObj._id }).select("device device_uid deviceId").lean();
-            const staffAlerts = await Alert.find({ assignedStaff: staffUserObj._id }).select("device_uid deviceId").lean();
-
             staffTasks.forEach(t => {
                 if (t.device) devConditions.push({ _id: t.device });
                 if (t.device_uid) devConditions.push({ device_uid: t.device_uid });
                 if (t.deviceId) devConditions.push({ deviceId: t.deviceId });
             });
 
-            staffAlerts.forEach(a => {
-                if (a.device_uid) devConditions.push({ device_uid: a.device_uid });
-                if (a.deviceId) devConditions.push({ deviceId: a.deviceId });
+            myDevices = await Device.find({ $or: devConditions }).select("_id device_uid deviceId location floor").lean();
+
+            // Build Alert query using ONLY fields that exist in Alert schema: device_uid, device (ObjectId)
+            const alertConditions = [];
+            const staffDeviceUids = [];
+            myDevices.forEach(d => {
+                if (d.device_uid) staffDeviceUids.push(d.device_uid);
+                if (d.deviceId) staffDeviceUids.push(d.deviceId);
+            });
+            staffTasks.forEach(t => {
+                if (t.device_uid) staffDeviceUids.push(t.device_uid);
+                if (t.deviceId) staffDeviceUids.push(t.deviceId);
             });
 
-            myDevices = await Device.find({
-                $or: devConditions
-            }).select("_id device_uid deviceId location floor").lean();
-
-            const allDeviceUids = [
-                ...myDevices.flatMap(d => [d.device_uid, d.deviceId, d._id ? d._id.toString() : null].filter(Boolean)),
-                ...staffTasks.flatMap(t => [t.device_uid, t.deviceId, t.device ? t.device.toString() : null].filter(Boolean)),
-                ...staffAlerts.flatMap(a => [a.device_uid, a.deviceId].filter(Boolean))
-            ];
-
-            const uniqueUids = Array.from(new Set(allDeviceUids));
-
-            if (uniqueUids.length > 0) {
-                const regexUids = uniqueUids.map(u => new RegExp(`^${u.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'));
-                query.$or = [
-                    { device_uid: { $in: regexUids } },
-                    { deviceId: { $in: regexUids } },
-                    { assignedStaff: staffUserObj._id }
-                ];
-            } else {
-                query.$or = [
-                    { assignedStaff: staffUserObj._id }
-                ];
+            const uniqueStaffUids = Array.from(new Set(staffDeviceUids.filter(Boolean)));
+            if (uniqueStaffUids.length > 0) {
+                const regexUids = uniqueStaffUids.map(u => new RegExp(`^${u.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'));
+                alertConditions.push({ device_uid: { $in: regexUids } });
             }
+            if (myDevices.length > 0) {
+                alertConditions.push({ device: { $in: myDevices.map(d => d._id) } });
+            }
+
+            if (alertConditions.length > 0) {
+                query.$or = alertConditions;
+            } else {
+                // No devices found for this staff — return empty
+                return res.status(200).json({ success: true, count: 0, alerts: [] });
+            }
+
         } else if (req.user && req.user.role === 'admin') {
-            myDevices = await Device.find({
-                $or: [
-                    { adminId: req.user.id },
-                    { adminId: null },
-                    { adminId: { $exists: false } }
-                ]
-            }).select("_id device_uid deviceId location floor").lean();
+            // Find devices registered by this admin
+            myDevices = await Device.find({ adminId: req.user.id }).select("_id device_uid deviceId location floor").lean();
 
             if (myDevices.length === 0) {
-                myDevices = await Device.find().select("_id device_uid deviceId location floor").lean();
+                // Admin has no registered devices -> Return 0 alert cards (Requirement 2 & Case 2)
+                return res.status(200).json({ success: true, count: 0, alerts: [] });
             }
+
+            // Build Alert query using ONLY fields that exist in Alert schema: device_uid, device (ObjectId)
+            const alertConditions = [];
+            const adminDeviceUids = [];
+            myDevices.forEach(d => {
+                if (d.device_uid) adminDeviceUids.push(d.device_uid);
+                if (d.deviceId) adminDeviceUids.push(d.deviceId);
+            });
+            const uniqueAdminUids = Array.from(new Set(adminDeviceUids.filter(Boolean)));
+            if (uniqueAdminUids.length > 0) {
+                const regexUids = uniqueAdminUids.map(u => new RegExp(`^${u.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'));
+                alertConditions.push({ device_uid: { $in: regexUids } });
+            }
+            alertConditions.push({ device: { $in: myDevices.map(d => d._id) } });
+
+            query.$or = alertConditions;
         } else {
             myDevices = await Device.find().select("_id device_uid deviceId location floor").lean();
         }
@@ -125,30 +137,10 @@ const getAlerts = async (req, res) => {
             if (d.deviceId) deviceMap[d.deviceId.toLowerCase()] = d;
         });
 
-        if (req.user && req.user.role === 'admin') {
-            const allDeviceUids = myDevices.flatMap(d => [d.device_uid, d.deviceId, d._id ? d._id.toString() : null].filter(Boolean));
-            if (allDeviceUids.length > 0) {
-                const regexUids = allDeviceUids.map(u => new RegExp(`^${u.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'));
-                query.$or = [
-                    { device_uid: { $in: regexUids } },
-                    { deviceId: { $in: regexUids } },
-                    { device: { $in: myDevices.map(d => d._id) } },
-                    { status: "OPEN" },
-                    { device: null },
-                    { device: { $exists: false } }
-                ];
-            }
-        }
-
         const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
         let alerts = await Alert.find(query).sort({ createdAt: -1 }).lean();
 
-        // Fallback: If query returned 0 alerts for admin, fetch all system alerts so screen is not empty
-        if (alerts.length === 0 && (!req.user || req.user.role === 'admin')) {
-            const fallbackQuery = { ...query };
-            delete fallbackQuery.$or;
-            alerts = await Alert.find(fallbackQuery).sort({ createdAt: -1 }).lean();
-        }
+        console.log(`📊 getAlerts query for ${req.user?.role} (${req.user?.id}): found ${alerts.length} alerts from DB`);
 
         // Bulk fetch all tasks
         const allTasks = await Task.find().populate("staff", "name empId userId").sort({ createdAt: -1 }).lean();
@@ -324,6 +316,8 @@ const getAlerts = async (req, res) => {
                     d._id ? d._id.toString().toLowerCase() : null
                 ].filter(Boolean))
             );
+
+            const staffCreationTime = getObjectCreationTime(staffUserObj);
 
             finalAlerts = mergedAlerts.filter(alertItem => {
                 const isResolved = alertItem.status === "RESOLVED" || alertItem.taskStatus === "VERIFIED" || alertItem.taskStatus === "COMPLETED" || alertItem.taskStatus === "RESOLVED";

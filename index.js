@@ -236,11 +236,38 @@ function connectMQTT() {
           return;
         }
 
-        const recordTimestamp = payload.timestamp ? new Date(payload.timestamp) : new Date();
-        const yyyy = recordTimestamp.getFullYear();
-        const mm = String(recordTimestamp.getMonth() + 1).padStart(2, '0');
-        const dd = String(recordTimestamp.getDate()).padStart(2, '0');
-        const dateStr = `${yyyy}-${mm}-${dd}`;
+        const parseMqttTimestamp = (ts) => {
+          if (!ts) return new Date();
+          if (ts instanceof Date) return ts;
+          if (typeof ts === 'number') {
+            return new Date(ts < 1e11 ? ts * 1000 : ts);
+          }
+          if (typeof ts === 'string') {
+            let cleanStr = ts.trim();
+            if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}/.test(cleanStr)) {
+              cleanStr = cleanStr.replace(' ', 'T');
+            }
+            const parsed = new Date(cleanStr);
+            if (!isNaN(parsed.getTime())) return parsed;
+          }
+          return new Date();
+        };
+
+        const getISTDateString = (dateInput) => {
+          const d = parseMqttTimestamp(dateInput);
+          if (isNaN(d.getTime())) return null;
+          return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+        };
+
+        const isTodayIST = (dateInput) => {
+          if (!dateInput) return true;
+          const inputDateStr = getISTDateString(dateInput);
+          const todayDateStr = getISTDateString(new Date());
+          return Boolean(inputDateStr && inputDateStr === todayDateStr);
+        };
+
+        const recordTimestamp = parseMqttTimestamp(payload.timestamp);
+        const dateStr = getISTDateString(recordTimestamp) || new Date().toISOString().split('T')[0];
 
         const sensorPayload = {
           device_uid: du,
@@ -269,7 +296,14 @@ function connectMQTT() {
           global.io.emit("device_status_update", sensorPayload);
         }
 
-        // 2. Evaluate Alerts & Thresholds (Runs independently of global.io)
+        // Check if timestamp belongs to current day (IST)
+        const isCurrentDayEvent = isTodayIST(payload.timestamp);
+        if (!isCurrentDayEvent) {
+          console.log(`ℹ️ MQTT payload timestamp [${payload.timestamp}] date (${getISTDateString(payload.timestamp)}) is NOT today (${getISTDateString(new Date())}) in IST — Skipping alert creation and notifications.`);
+          return;
+        }
+
+        // 2. Evaluate Alerts & Thresholds for Current-Day Events
         const settings = await Settings.findOne() || { counterThreshold: 100, odorThreshold: 80 };
         
         let alertType = null;
