@@ -279,28 +279,29 @@ function connectMQTT() {
           OdorSensVal: o !== undefined ? Number(o) : undefined
         };
 
-        // Save historical data
+        // Always save historical data for graphs, reports, and average ratings
         await SensorData.create(sensorPayload);
+        console.log(`💾 Historical SensorData saved for device ${du} (date: ${dateStr})`);
 
-        // Update latest device state
+        // Check if timestamp belongs to current day (IST)
+        const isCurrentDayEvent = isTodayIST(payload.timestamp);
+        if (!isCurrentDayEvent) {
+          console.log(`ℹ️ MQTT payload timestamp [${payload.timestamp}] date (${getISTDateString(payload.timestamp)}) is NOT today (${getISTDateString(new Date())}) in IST — Saved to historical SensorData for reports/graphs, but skipping live status update & alert creation.`);
+          return;
+        }
+
+        // Update latest device state ONLY for current-day events
         await LatestDeviceStatus.findOneAndUpdate(
           { device_uid: du },
           { $set: sensorPayload },
           { upsert: true, new: true }
         );
 
-        console.log("💾 Sensor data & device status saved");
+        console.log(`📡 Updated LatestDeviceStatus for device ${du} with today's live data`);
 
         // 1. Emit live status WebSocket event to all connected clients
         if (global.io) {
           global.io.emit("device_status_update", sensorPayload);
-        }
-
-        // Check if timestamp belongs to current day (IST)
-        const isCurrentDayEvent = isTodayIST(payload.timestamp);
-        if (!isCurrentDayEvent) {
-          console.log(`ℹ️ MQTT payload timestamp [${payload.timestamp}] date (${getISTDateString(payload.timestamp)}) is NOT today (${getISTDateString(new Date())}) in IST — Skipping alert creation and notifications.`);
-          return;
         }
 
         // 2. Evaluate Alerts & Thresholds for Current-Day Events

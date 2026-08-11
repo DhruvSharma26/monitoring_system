@@ -54,14 +54,20 @@ const getDashboard = async (req, res) => {
 
             let toiletStatus = "clean";
             if (item) {
-                const odor = Number(item.OdorSensVal) || 0;
-                const counter = Number(item.Counter) || 0;
+                const itemDateStr = item.timestamp ? new Date(item.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : null;
+                const todayDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+                const isToday = Boolean(itemDateStr && itemDateStr === todayDateStr);
 
-                if (item.feedback === 3 || odor >= warningOdorThreshold || counter >= warningCounterThreshold) {
-                    toiletStatus = "warning";
-                }
-                if (item.feedback === 4 || odor >= odorThreshold || counter >= counterThreshold) {
-                    toiletStatus = "critical";
+                if (isToday) {
+                    const odor = Number(item.OdorSensVal) || 0;
+                    const counter = Number(item.Counter) || 0;
+
+                    if (item.feedback === 3 || odor >= warningOdorThreshold || counter >= warningCounterThreshold) {
+                        toiletStatus = "warning";
+                    }
+                    if (item.feedback === 4 || odor >= odorThreshold || counter >= counterThreshold) {
+                        toiletStatus = "critical";
+                    }
                 }
             }
 

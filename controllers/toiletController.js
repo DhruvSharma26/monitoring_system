@@ -59,12 +59,16 @@ const getToiletDetails = async (req, res) => {
         const warningCounterThreshold = Math.round(counterThreshold * 0.7);
 
         let status = "clean";
-        if (latestStatus) {
-            const odor = Number(latestStatus.OdorSensVal) || 0;
-            const counter = Number(latestStatus.Counter) || 0;
+        if (latestStatus && latestStatus.timestamp) {
+            const latestDateStr = new Date(latestStatus.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+            const todayDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+            if (latestDateStr === todayDateStr) {
+                const odor = Number(latestStatus.OdorSensVal) || 0;
+                const counter = Number(latestStatus.Counter) || 0;
 
-            if (latestStatus.feedback === 3 || odor >= warningOdorThreshold || counter >= warningCounterThreshold) status = "warning";
-            if (latestStatus.feedback === 4 || odor >= odorThreshold || counter >= counterThreshold) status = "critical";
+                if (latestStatus.feedback === 3 || odor >= warningOdorThreshold || counter >= warningCounterThreshold) status = "warning";
+                if (latestStatus.feedback === 4 || odor >= odorThreshold || counter >= counterThreshold) status = "critical";
+            }
         }
 
         let lastCleanedByStaff = "Not yet cleaned today";
@@ -137,14 +141,13 @@ const getToiletDetails = async (req, res) => {
 
             let dayCounter = 0;
             let dayOdor = 0;
-            let dayRating = 0.0;
-
             if (dayLogs.length > 0) {
-                // Safely compute max counter without spread operator
+                // Calculate total counter for the day (sum of all counter readings for that device on that day)
+                let sumCounter = 0;
                 for (const l of dayLogs) {
-                    const c = Number(l.Counter) || 0;
-                    if (c > dayCounter) dayCounter = c;
+                    sumCounter += Number(l.Counter) || 0;
                 }
+                dayCounter = sumCounter;
 
                 // Average odor
                 let sumOdor = 0;

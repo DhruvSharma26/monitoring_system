@@ -75,14 +75,22 @@ const getToilets = async (req, res) => {
             }
 
             let toiletStatus = "clean";
-            const odor = Number(latestStatus.OdorSensVal) || 0;
-            const counter = Number(latestStatus.Counter) || 0;
+            
+            // Check if latestStatus timestamp belongs to current day in IST (Asia/Kolkata)
+            const latestDateStr = latestStatus.timestamp ? new Date(latestStatus.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : null;
+            const todayDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+            const isToday = Boolean(latestDateStr && latestDateStr === todayDateStr);
 
-            if (latestStatus.feedback === 3 || odor >= warningOdorThreshold || counter >= warningCounterThreshold) {
-                toiletStatus = "warning";
-            }
-            if (latestStatus.feedback === 4 || odor >= odorThreshold || counter >= counterThreshold) {
-                toiletStatus = "critical";
+            if (isToday) {
+                const odor = Number(latestStatus.OdorSensVal) || 0;
+                const counter = Number(latestStatus.Counter) || 0;
+
+                if (latestStatus.feedback === 3 || odor >= warningOdorThreshold || counter >= warningCounterThreshold) {
+                    toiletStatus = "warning";
+                }
+                if (latestStatus.feedback === 4 || odor >= odorThreshold || counter >= counterThreshold) {
+                    toiletStatus = "critical";
+                }
             }
 
             if (status && status.toLowerCase() !== "all") {
@@ -118,15 +126,21 @@ const getToilets = async (req, res) => {
                 averageRating = feedbackToRating(latestStatus.feedback);
             }
 
-            let counterVal = Number(latestStatus.Counter) || 0;
-            let odorVal = Number(latestStatus.OdorSensVal) || 0;
+            // Scope live counter and odor metrics on Toilets Tab strictly to today's date in IST
+            const todayDevLogs = devLogs.filter(log => {
+                const logDate = log.timestamp ? new Date(log.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : null;
+                return logDate && logDate === todayDateStr;
+            });
 
-            if (devLogs.length > 0) {
-                const maxSensorCounter = Math.max(...devLogs.map(l => Number(l.Counter) || 0));
-                if (maxSensorCounter > counterVal) counterVal = maxSensorCounter;
+            let counterVal = isToday ? (Number(latestStatus.Counter) || 0) : 0;
+            let odorVal = isToday ? (Number(latestStatus.OdorSensVal) || 0) : 0;
 
-                const maxSensorOdor = Math.max(...devLogs.map(l => Number(l.OdorSensVal) || 0));
-                if (maxSensorOdor > odorVal) odorVal = maxSensorOdor;
+            if (todayDevLogs.length > 0) {
+                const maxTodayCounter = Math.max(...todayDevLogs.map(l => Number(l.Counter) || 0));
+                if (maxTodayCounter > counterVal) counterVal = maxTodayCounter;
+
+                const maxTodayOdor = Math.max(...todayDevLogs.map(l => Number(l.OdorSensVal) || 0));
+                if (maxTodayOdor > odorVal) odorVal = maxTodayOdor;
             }
 
             let totalUsage = counterVal;
