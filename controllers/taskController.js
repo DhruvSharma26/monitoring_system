@@ -447,8 +447,23 @@ const reassignTask = async (req, res) => {
         task.status = "ASSIGNED";
         task.progressPercent = 0;
         task.assignedAt = now;
+        task.reassignedAt = now;
         task.assignedBy = req.user ? req.user.id : null;
-        if (notes) task.notes = notes;
+        if (notes) {
+            task.notes = notes;
+            task.adminRemarks = notes;
+        }
+
+        // Clear previous work and submission state so staff can start fresh work & upload new photos
+        task.startedAt = null;
+        task.submittedAt = null;
+        task.photosUploadedAt = null;
+        task.verifiedAt = null;
+        task.completedAt = null;
+        task.resolvedAt = null;
+        task.beforeCleaningPhoto = "";
+        task.afterCleaningPhoto = "";
+        task.cleaningPhotos = [];
 
         task.timeline.push({
             status: "REASSIGNED",
@@ -464,7 +479,7 @@ const reassignTask = async (req, res) => {
 
         if (task.alert) {
             const Alert = require("../models/Alert");
-            await Alert.findByIdAndUpdate(task.alert, { status: "ASSIGNED" });
+            await Alert.findByIdAndUpdate(task.alert, { status: "ASSIGNED", assignedStaff: staff._id });
         }
 
         const device = task.device ? await Device.findById(task.device) : null;
@@ -474,6 +489,12 @@ const reassignTask = async (req, res) => {
             notificationService.sendTaskAssignedNotification(task, staff, req.user, device);
         } catch (err) {
             console.log("Error sending task reassignment notification:", err.message);
+        }
+
+        if (global.io) {
+            global.io.emit("task_status_updated", { taskId: task._id, status: "ASSIGNED", staffId: staff._id });
+            global.io.emit("task_reassigned", { taskId: task._id, status: "ASSIGNED", staffId: staff._id });
+            global.io.emit("new_task", { taskId: task._id, status: "ASSIGNED", staffId: staff._id });
         }
 
         broadcastTaskUpdate(task);
