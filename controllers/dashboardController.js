@@ -79,24 +79,16 @@ const getDashboard = async (req, res) => {
 
             if (toiletStatus === "critical") {
                 critical++;
-                totalRating += 1.0;
             } else if (toiletStatus === "warning") {
                 attention++;
-                totalRating += 2.5;
             } else {
                 clean++;
-                totalRating += 5.0;
             }
         });
 
-        const averageRating =
-            devices.length > 0
-                ? (totalRating / devices.length).toFixed(1)
-                : "5.0";
-
-        // Compute real dynamic usage_data and weekly_ratings from last 7 days sensor logs
-        const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+        // Compute 24-hour weighted average rating and total ratings count
         const now = new Date();
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(now.getDate() - 6);
         sevenDaysAgo.setHours(0, 0, 0, 0);
@@ -104,6 +96,35 @@ const getDashboard = async (req, res) => {
         const allUids = devices.flatMap(d => [d.device_uid, d.deviceId, d._id ? d._id.toString() : null].filter(Boolean));
         const uidsRegex = allUids.map(u => new RegExp(`^${u.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'));
 
+        // Query logs for last 24h ratings
+        const logs24h = await SensorData.find({
+            $or: [
+                { device_uid: { $in: uidsRegex } },
+                { deviceId: { $in: uidsRegex } }
+            ],
+            timestamp: { $gte: twentyFourHoursAgo }
+        }).lean();
+
+        const feedbackToRating = (fb) => {
+            const numFb = Number(fb);
+            if (numFb === 1 || numFb === 2) return 5.0;
+            if (numFb === 3) return 2.5;
+            if (numFb === 4) return 1.0;
+            return 5.0;
+        };
+
+        const validLogs24h = logs24h.filter(l => l.feedback !== undefined && l.feedback !== null && Number(l.feedback) > 0);
+        const totalRatings = validLogs24h.length;
+        let averageRatingVal = 0.0;
+
+        if (totalRatings > 0) {
+            const sumStarRatings = validLogs24h.reduce((acc, l) => acc + feedbackToRating(l.feedback), 0);
+            averageRatingVal = Number((sumStarRatings / totalRatings).toFixed(2));
+        }
+
+        const averageRating = averageRatingVal;
+
+        // Query logs for 7-day usage and weekly ratings curves
         const sensorLogs = await SensorData.find({
             $or: [
                 { device_uid: { $in: uidsRegex } },
@@ -111,13 +132,6 @@ const getDashboard = async (req, res) => {
             ],
             timestamp: { $gte: sevenDaysAgo }
         }).lean();
-
-        const feedbackToRating = (fb) => {
-            if (fb === 1 || fb === 2) return 5.0;
-            if (fb === 3) return 2.5;
-            if (fb === 4) return 1.0;
-            return 5.0;
-        };
 
         const usage_data = [];
         const weekly_ratings = [];
@@ -184,8 +198,6 @@ const getDashboard = async (req, res) => {
             weekly_ratings.push({ day: dayLabel, rating: dayRatingAvg });
         }
 
-        const total_feedbacks = sensorLogs.length;
-
         res.status(200).json({
             success: true,
             dashboard: {
@@ -194,7 +206,8 @@ const getDashboard = async (req, res) => {
                 attentionToilets: attention,
                 criticalToilets: critical,
                 averageRating,
-                total_feedbacks,
+                totalRatings,
+                total_feedbacks: totalRatings,
                 usage_data,
                 weekly_ratings,
                 liveAlerts
@@ -709,10 +722,11 @@ const getToiletRatingComparison = async (req, res) => {
             };
         });
 
-        const totalRatingSum = toiletData.reduce((acc, t) => acc + (t.averageRating > 0 ? t.averageRating : 5.0), 0);
-        const cityAverage = toiletData.length > 0
-            ? parseFloat((totalRatingSum / toiletData.length).toFixed(1))
-            : 5.0;
+        const totalCityRatingsCount = toiletData.reduce((acc, t) => acc + (t.totalFeedbacks || 0), 0);
+        const totalCityRatingSum = toiletData.reduce((acc, t) => acc + ((t.averageRating || 0) * (t.totalFeedbacks || 0)), 0);
+        const cityAverage = totalCityRatingsCount > 0
+            ? Number((totalCityRatingSum / totalCityRatingsCount).toFixed(2))
+            : 0.0;
 
         res.status(200).json({
             success: true,
