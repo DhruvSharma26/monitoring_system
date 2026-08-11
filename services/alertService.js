@@ -16,9 +16,11 @@ const processOrCreateDeviceAlert = async (alertData) => {
         const devUid = device_uid || deviceId;
         if (!devUid) return null;
 
-        // Resolve device model if available
+        const devRegex = new RegExp(`^${devUid.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i');
+
+        // Resolve device model if available (case-insensitive)
         const device = await Device.findOne({
-            $or: [{ device_uid: devUid }, { deviceId: devUid }]
+            $or: [{ device_uid: devRegex }, { deviceId: devRegex }]
         });
 
         const targetUid = device ? device.device_uid : devUid;
