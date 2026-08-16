@@ -2,42 +2,41 @@ const Device = require("../models/Device");
 const LatestDeviceStatus = require("../models/LatestDeviceStatus");
 const SensorData = require("../models/SensorData");
 const Task = require("../models/Task");
-
-const feedbackToRating = (fb) => {
-    if (fb === 1 || fb === 2) return 5.0;
-    if (fb === 3) return 2.5;
-    if (fb === 4) return 1.0;
-    return 4.5;
-};
+const User = require("../models/User");
+const Assignment = require("../models/Assignment");
+const ratingService = require("../services/ratingService");
 
 const getToilets = async (req, res) => {
     try {
         const { status } = req.query;
 
-        const User = require("../models/User");
-        let adminDevices = await Device.find({ adminId: req.user.id }).populate("assignedStaff", "name empId userId").sort({ createdAt: -1 }).lean();
+        let adminDevices = await Device.find({ adminId: req.user.id })
+            .populate("assignedStaff", "name empId userId email")
+            .sort({ createdAt: -1 })
+            .lean();
+
         if (!adminDevices || adminDevices.length === 0) {
-            adminDevices = await Device.find().populate("assignedStaff", "name empId userId").sort({ createdAt: -1 }).lean();
+            adminDevices = await Device.find()
+                .populate("assignedStaff", "name empId userId email")
+                .sort({ createdAt: -1 })
+                .lean();
         }
         const devices = adminDevices;
 
         const Settings = require("../models/Settings");
-        const [statuses, allSensorLogs, completedTasks, allStaff, settings] = await Promise.all([
+        const [statuses, completedTasks, allActiveAssignments, settings] = await Promise.all([
             LatestDeviceStatus.find().lean(),
-            SensorData.find().sort({ timestamp: 1 }).lean(),
             Task.find({ status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] } })
                 .populate("staff", "name empId userId")
                 .sort({ updatedAt: -1 })
                 .lean(),
-            User.find({ role: "staff" }).select("name empId userId assignedDevice").lean(),
+            Assignment.find({ status: "ACTIVE" })
+                .populate("staff", "name empId userId")
+                .lean(),
             Settings.findOne({ adminId: req.user.id }).lean()
         ]);
 
         const userSettings = settings || (await Settings.findOne().lean());
-        const odorThreshold = userSettings?.odorThreshold || 80;
-        const counterThreshold = userSettings?.counterThreshold || 100;
-        const warningOdorThreshold = Math.round(odorThreshold * 0.625);
-        const warningCounterThreshold = Math.round(counterThreshold * 0.7);
 
         const statusMap = {};
         statuses.forEach(item => {
@@ -57,26 +56,26 @@ const getToilets = async (req, res) => {
                 }
             }
 
-            let assignedStaffName = "";
+            // 1. Resolve Assigned Staff (from Device.assignedStaff or active Assignment)
+            let assignedStaffName = "Unassigned";
             let assignedStaffUserId = "";
             let assignedStaffEmpId = "";
 
             if (device.assignedStaff) {
-                assignedStaffName = device.assignedStaff.name || "";
+                assignedStaffName = device.assignedStaff.name || "Assigned Staff";
                 assignedStaffUserId = device.assignedStaff.userId || "";
                 assignedStaffEmpId = device.assignedStaff.empId || "";
             } else {
-                const assignedUser = allStaff.find(s => String(s.assignedDevice) === String(device._id));
-                if (assignedUser) {
-                    assignedStaffName = assignedUser.name || "";
-                    assignedStaffUserId = assignedUser.userId || "";
-                    assignedStaffEmpId = assignedUser.empId || "";
+                const activeAsgn = allActiveAssignments.find(a => a.device && String(a.device) === String(device._id));
+                if (activeAsgn && activeAsgn.staff) {
+                    assignedStaffName = activeAsgn.staff.name || "Assigned Staff";
+                    assignedStaffUserId = activeAsgn.staff.userId || "";
+                    assignedStaffEmpId = activeAsgn.staff.empId || "";
                 }
             }
 
+            // 2. Status Calculation (Clean, Warning, Critical) - NO "DIRTY"
             let toiletStatus = "clean";
-            
-            // Check if latestStatus timestamp belongs to current day in IST (Asia/Kolkata)
             const latestDateStr = latestStatus.timestamp ? new Date(latestStatus.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : null;
             const todayDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
             const isToday = Boolean(latestDateStr && latestDateStr === todayDateStr);
@@ -99,6 +98,7 @@ const getToilets = async (req, res) => {
                 }
             }
 
+            // REMOVE "DIRTY" FILTER - Filter by requested status (clean, warning/needs attention, critical)
             if (status && status.toLowerCase() !== "all") {
                 const reqSt = status.toLowerCase().trim();
                 const currentSt = toiletStatus.toLowerCase();
@@ -114,53 +114,20 @@ const getToilets = async (req, res) => {
                 }
             }
 
-            const devLogs = allSensorLogs.filter(log => devUids.some(u =>
-                (log.device_uid && log.device_uid.toLowerCase() === u.toLowerCase()) ||
-                (log.deviceId && log.deviceId.toLowerCase() === u.toLowerCase())
-            ));
+            // 3. Compute Rolling Last 24-Hour Metrics
+            const metrics24h = await ratingService.get24HourMetrics(devUids);
 
-            let averageRating = 5.0;
-            if (devLogs.length > 0) {
-                const logsWithFeedback = devLogs.filter(l => l.feedback !== undefined && l.feedback !== null);
-                if (logsWithFeedback.length > 0) {
-                    const sum = logsWithFeedback.reduce((acc, l) => acc + feedbackToRating(l.feedback), 0);
-                    averageRating = parseFloat((sum / logsWithFeedback.length).toFixed(1));
-                } else if (latestStatus.feedback !== undefined) {
-                    averageRating = feedbackToRating(latestStatus.feedback);
-                }
-            } else if (latestStatus.feedback !== undefined) {
-                averageRating = feedbackToRating(latestStatus.feedback);
-            }
-
-            // Scope live counter and odor metrics on Toilets Tab strictly to today's date in IST
-            const todayDevLogs = devLogs.filter(log => {
-                const logDate = log.timestamp ? new Date(log.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : null;
-                return logDate && logDate === todayDateStr;
-            });
-
-            let counterVal = isToday ? (Number(latestStatus.Counter) || 0) : 0;
-            let odorVal = isToday ? (Number(latestStatus.OdorSensVal) || 0) : 0;
-
-            if (todayDevLogs.length > 0) {
-                const maxTodayCounter = Math.max(...todayDevLogs.map(l => Number(l.Counter) || 0));
-                if (maxTodayCounter > counterVal) counterVal = maxTodayCounter;
-
-                const maxTodayOdor = Math.max(...todayDevLogs.map(l => Number(l.OdorSensVal) || 0));
-                if (maxTodayOdor > odorVal) odorVal = maxTodayOdor;
-            }
-
-            let totalUsage = counterVal;
-
+            // 4. Resolve Last Cleaned Info & Last Cleaned By Staff
             const deviceTask = completedTasks.find(t => String(t.device) === String(device._id));
-            let lastCleanedAt = "";
-            let lastCleanedByStaffName = "";
+            let lastCleanedAtFormatted = "Not cleaned yet";
+            let lastCleanedByStaffName = "N/A";
             let lastCleanedByStaffUserId = "";
             let lastCleanedByStaffEmpId = "";
 
             if (deviceTask) {
                 const cleanedDate = deviceTask.verifiedAt || deviceTask.completedAt || deviceTask.submittedAt || deviceTask.updatedAt;
                 if (cleanedDate) {
-                    lastCleanedAt = new Date(cleanedDate).toLocaleString("en-US", {
+                    lastCleanedAtFormatted = new Date(cleanedDate).toLocaleString("en-US", {
                         day: "2-digit",
                         month: "short",
                         year: "numeric",
@@ -169,12 +136,12 @@ const getToilets = async (req, res) => {
                     });
                 }
                 if (deviceTask.staff) {
-                    lastCleanedByStaffName = deviceTask.staff.name || "";
+                    lastCleanedByStaffName = deviceTask.staff.name || "N/A";
                     lastCleanedByStaffUserId = deviceTask.staff.userId || "";
                     lastCleanedByStaffEmpId = deviceTask.staff.empId || "";
                 }
             } else if (latestStatus && latestStatus.timestamp) {
-                lastCleanedAt = new Date(latestStatus.timestamp).toLocaleString("en-US", {
+                lastCleanedAtFormatted = new Date(latestStatus.timestamp).toLocaleString("en-US", {
                     day: "2-digit",
                     month: "short",
                     year: "numeric",
@@ -184,28 +151,43 @@ const getToilets = async (req, res) => {
             }
 
             toilets.push({
+                _id: device._id,
                 deviceId: device.deviceId || device.device_uid,
                 device_uid: device.device_uid,
-                location: device.location,
-                floor: device.floor,
+                location: device.location || device.locationName || "Location",
+                locationName: device.locationName || device.location || "Location",
+                floor: device.floor || "Ground",
                 status: toiletStatus,
-                rating: averageRating,
-                averageRating: averageRating,
-                usageToday: totalUsage,
-                totalUsage: totalUsage,
-                feedback: latestStatus.feedback || 0,
-                Counter: counterVal,
-                OdorSensVal: odorVal,
-                latitude: device.latitude,
-                longitude: device.longitude,
-                timestamp: latestStatus.timestamp || device.createdAt,
+
+                // Rolling 24 Hours Metrics
+                last24Hours: {
+                    averageRating: metrics24h.averageRating,
+                    totalRatings: metrics24h.totalRatings,
+                    totalUsage: metrics24h.totalUsage
+                },
+                averageRating: metrics24h.averageRating !== null ? metrics24h.averageRating : 5.0,
+                rating: metrics24h.averageRating !== null ? metrics24h.averageRating : 5.0,
+                totalRatings24h: metrics24h.totalRatings,
+                totalUsage: metrics24h.totalUsage,
+                usageToday: metrics24h.totalUsage,
+
+                // Cleaning & Staff Info
+                lastCleanedAt: lastCleanedAtFormatted,
+                lastCleanedByStaffName: lastCleanedByStaffName,
+                lastCleanedByStaffUserId: lastCleanedByStaffUserId,
+                lastCleanedByStaffEmpId: lastCleanedByStaffEmpId,
+
                 assignedStaffName: assignedStaffName,
                 assignedStaffUserId: assignedStaffUserId,
                 assignedStaffEmpId: assignedStaffEmpId,
-                lastCleanedAt: lastCleanedAt,
-                lastCleanedByStaffName: lastCleanedByStaffName,
-                lastCleanedByStaffUserId: lastCleanedByStaffUserId,
-                lastCleanedByStaffEmpId: lastCleanedByStaffEmpId
+
+                // Live Sensor snapshot
+                feedback: latestStatus.feedback || 0,
+                Counter: isToday ? (Number(latestStatus.Counter) || 0) : 0,
+                OdorSensVal: isToday ? (Number(latestStatus.OdorSensVal) || 0) : 0,
+                latitude: device.latitude,
+                longitude: device.longitude,
+                timestamp: latestStatus.timestamp || device.createdAt
             });
         }
 

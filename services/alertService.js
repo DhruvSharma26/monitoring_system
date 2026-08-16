@@ -1,16 +1,9 @@
 const Alert = require("../models/Alert");
 const Task = require("../models/Task");
 const Device = require("../models/Device");
+const User = require("../models/User");
+const Assignment = require("../models/Assignment");
 
-/**
- * Business Rule:
- * For a given Device ID:
- * - If its latest existing alert is still in "Not Assigned" (status == OPEN and no assigned Task),
- *   overwrite/update that existing Not Assigned alert with the new alert data.
- * - If the existing alert/task has already been ASSIGNED, preserve it untouched and create
- *   a new Not Assigned alert for the new alert.
- */
-// In-memory mutex locks per device to prevent race conditions during rapid MQTT messages
 const alertProcessingLocks = new Map();
 
 const processOrCreateDeviceAlert = async (alertData) => {
@@ -35,15 +28,10 @@ const processOrCreateDeviceAlert = async (alertData) => {
     }
 };
 
-const processOrCreateDeviceAlertInternal = async (alertData) => {
+const resolveOpenAlertsForDevice = async (devUid) => {
     try {
-        const { device_uid, deviceId, alertType, alertSubtype, rating, toiletStatus, description, feedback, Counter, OdorSensVal } = alertData;
-        const devUid = device_uid || deviceId;
-        if (!devUid) return null;
-
+        if (!devUid) return;
         const devRegex = new RegExp(`^${devUid.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i');
-
-        // Resolve device model if available (case-insensitive)
         const device = await Device.findOne({
             $or: [{ device_uid: devRegex }, { deviceId: devRegex }]
         });
@@ -51,58 +39,149 @@ const processOrCreateDeviceAlertInternal = async (alertData) => {
         const targetUid = device ? device.device_uid : devUid;
         const targetDevId = device ? device.deviceId : devUid;
 
-        // Look for open (unassigned) alerts for this device
         const openAlerts = await Alert.find({
             $or: [
                 { device_uid: targetUid },
                 { deviceId: targetDevId },
                 ...(device ? [{ device: device._id }] : [])
             ],
-            status: "OPEN"
-        }).sort({ createdAt: -1 });
-
-        let existingUnassignedAlert = null;
+            status: { $in: ["OPEN", "ASSIGNED"] }
+        });
 
         for (const alt of openAlerts) {
-            // Check if this alert is linked to an assigned task
             const linkedTask = await Task.findOne({
                 alert: alt._id,
                 status: { $nin: ["CANCELLED"] }
             });
 
-            // If no active task or task has no staff assigned, it is truly Unassigned
-            if (!linkedTask || !linkedTask.staff) {
+            // Only auto-resolve if linked task hasn't been started yet by staff
+            if (!linkedTask || linkedTask.status === "ASSIGNED") {
+                alt.status = "RESOLVED";
+                alt.resolvedAt = new Date();
+                await alt.save();
+
+                if (linkedTask) {
+                    linkedTask.status = "COMPLETED";
+                    linkedTask.completedAt = new Date();
+                    await linkedTask.save();
+                }
+            }
+        }
+    } catch (err) {
+        console.error("Error in resolveOpenAlertsForDevice:", err);
+    }
+};
+
+const processOrCreateDeviceAlertInternal = async (alertData) => {
+    try {
+        const {
+            device_uid,
+            deviceId,
+            alertCategory,
+            alertType,
+            alertSubtype,
+            rating,
+            toiletStatus,
+            description,
+            feedback,
+            Counter,
+            OdorSensVal,
+            counterThreshold,
+            odorThreshold,
+            counterValue,
+            odorValue,
+            feedbackValue,
+            counterSeverity,
+            odorSeverity,
+            feedbackSeverity,
+            triggeredValues
+        } = alertData;
+
+        const devUid = device_uid || deviceId;
+        if (!devUid) return null;
+
+        const devRegex = new RegExp(`^${devUid.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i');
+
+        const device = await Device.findOne({
+            $or: [{ device_uid: devRegex }, { deviceId: devRegex }]
+        });
+
+        const targetUid = device ? device.device_uid : devUid;
+        const targetDevId = device ? device.deviceId : devUid;
+
+        let assignedStaffId = device ? (device.assignedStaff || null) : null;
+        if (!assignedStaffId && device) {
+            const activeAsgn = await Assignment.findOne({ device: device._id, status: "ACTIVE" });
+            if (activeAsgn) assignedStaffId = activeAsgn.staff;
+        }
+
+        const initialAlertStatus = assignedStaffId ? "ASSIGNED" : "OPEN";
+
+        const openAlerts = await Alert.find({
+            $or: [
+                { device_uid: targetUid },
+                { deviceId: targetDevId },
+                ...(device ? [{ device: device._id }] : [])
+            ],
+            status: { $in: ["OPEN", "ASSIGNED"] }
+        }).sort({ createdAt: -1 });
+
+        let existingUnassignedAlert = null;
+        for (const alt of openAlerts) {
+            const linkedTask = await Task.findOne({
+                alert: alt._id,
+                status: { $nin: ["CANCELLED"] }
+            });
+
+            if (!linkedTask || linkedTask.status === "ASSIGNED") {
                 existingUnassignedAlert = alt;
                 break;
             }
         }
 
+        const normalizedCategory = alertCategory || (alertType === "CRITICAL" ? "Critical" : "Need Attention");
+
         let resultAlert;
         let isOverwritten = false;
 
         if (existingUnassignedAlert) {
-            // SCENARIO 1: Overwrite existing Not Assigned alert with latest parameters
+            existingUnassignedAlert.alertCategory = normalizedCategory;
             existingUnassignedAlert.alertType = alertType || existingUnassignedAlert.alertType;
             if (alertSubtype !== undefined) existingUnassignedAlert.alertSubtype = alertSubtype;
             if (rating !== undefined) existingUnassignedAlert.rating = rating;
             if (toiletStatus !== undefined) existingUnassignedAlert.toiletStatus = toiletStatus;
             if (description !== undefined) existingUnassignedAlert.description = description;
-            if (feedback !== undefined) existingUnassignedAlert.feedback = feedback;
-            if (Counter !== undefined) existingUnassignedAlert.Counter = Counter;
-            if (OdorSensVal !== undefined) existingUnassignedAlert.OdorSensVal = OdorSensVal;
-            existingUnassignedAlert.status = "OPEN";
-            existingUnassignedAlert.createdAt = new Date(); // Refresh timestamp for new alert
+
+            existingUnassignedAlert.feedback = feedback !== undefined ? feedback : existingUnassignedAlert.feedback;
+            existingUnassignedAlert.Counter = Counter !== undefined ? Counter : existingUnassignedAlert.Counter;
+            existingUnassignedAlert.OdorSensVal = OdorSensVal !== undefined ? OdorSensVal : existingUnassignedAlert.OdorSensVal;
+
+            if (counterThreshold !== undefined) existingUnassignedAlert.counterThreshold = counterThreshold;
+            if (odorThreshold !== undefined) existingUnassignedAlert.odorThreshold = odorThreshold;
+            if (counterValue !== undefined) existingUnassignedAlert.counterValue = counterValue;
+            if (odorValue !== undefined) existingUnassignedAlert.odorValue = odorValue;
+            if (feedbackValue !== undefined) existingUnassignedAlert.feedbackValue = feedbackValue;
+
+            if (counterSeverity !== undefined) existingUnassignedAlert.counterSeverity = counterSeverity;
+            if (odorSeverity !== undefined) existingUnassignedAlert.odorSeverity = odorSeverity;
+            if (feedbackSeverity !== undefined) existingUnassignedAlert.feedbackSeverity = feedbackSeverity;
+
+            if (triggeredValues !== undefined) existingUnassignedAlert.triggeredValues = triggeredValues;
+
+            existingUnassignedAlert.status = initialAlertStatus;
+            existingUnassignedAlert.createdAt = new Date();
             await existingUnassignedAlert.save();
 
             resultAlert = existingUnassignedAlert;
             isOverwritten = true;
-            console.log(`🔄 Overwrote Not Assigned alert for device ${targetUid}: ${alertType} (${alertSubtype})`);
+            console.log(`Overwrote alert for device ${targetUid}: ${normalizedCategory}`);
         } else {
-            // SCENARIO 2: Existing alert was Assigned (or no alert exists) -> Create new Not Assigned alert
             resultAlert = await Alert.create({
                 device_uid: targetUid,
+                deviceId: targetDevId,
                 device: device ? device._id : null,
-                alertType: alertType,
+                alertCategory: normalizedCategory,
+                alertType: alertType || (normalizedCategory === "Critical" ? "CRITICAL" : "NEEDS_ATTENTION"),
                 alertSubtype: alertSubtype,
                 rating: rating,
                 toiletStatus: toiletStatus,
@@ -110,11 +189,66 @@ const processOrCreateDeviceAlertInternal = async (alertData) => {
                 feedback: feedback !== undefined ? feedback : 0,
                 Counter: Counter !== undefined ? Counter : 0,
                 OdorSensVal: OdorSensVal !== undefined ? OdorSensVal : 0,
-                status: "OPEN"
+
+                counterThreshold,
+                odorThreshold,
+                counterValue,
+                odorValue,
+                feedbackValue,
+
+                counterSeverity,
+                odorSeverity,
+                feedbackSeverity,
+
+                triggeredValues: triggeredValues || [],
+
+                status: initialAlertStatus
             });
 
             isOverwritten = false;
-            console.log(`🚨 Created NEW Not Assigned alert for device ${targetUid}: ${alertType} (${alertSubtype})`);
+            console.log(`Created NEW alert (${initialAlertStatus}) for device ${targetUid}: ${normalizedCategory}`);
+        }
+
+        // AUTOMATIC TASK ASSIGNMENT TO ASSIGNED STAFF
+        if (assignedStaffId && device) {
+            const existingTask = await Task.findOne({ alert: resultAlert._id });
+            if (!existingTask) {
+                const now = new Date();
+                const newTask = await Task.create({
+                    taskName: `Restroom Maintenance - ${device.locationName || device.location || targetUid}`,
+                    title: `${normalizedCategory} Maintenance Task`,
+                    alert: resultAlert._id,
+                    device: device._id,
+                    staff: assignedStaffId,
+                    status: "ASSIGNED",
+                    priority: normalizedCategory === "Critical" ? "high" : "medium",
+                    assignedAt: now,
+                    notes: `Automatically assigned based on device ownership. ${description}`,
+                    timeline: [{
+                        status: "ASSIGNED",
+                        timestamp: now,
+                        notes: "Automatically assigned to device owner staff member"
+                    }]
+                });
+
+                try {
+                    const notificationService = require("./notificationService");
+                    const staffUser = await User.findById(assignedStaffId);
+                    if (staffUser) {
+                        notificationService.sendTaskAssignedNotification(newTask, staffUser, null, device);
+                    }
+                } catch (err) {
+                    console.log("Error sending automatic task notification:", err.message);
+                }
+
+                if (global.io) {
+                    global.io.emit("new_task", { taskId: newTask._id, status: "ASSIGNED", staffId: assignedStaffId });
+                    global.io.emit("task_status_updated", { taskId: newTask._id, status: "ASSIGNED", staffId: assignedStaffId });
+                }
+            } else if (existingTask.status === "ASSIGNED" && existingTask.staff.toString() !== assignedStaffId.toString()) {
+                existingTask.staff = assignedStaffId;
+                await existingTask.save();
+            }
         }
 
         return { alert: resultAlert, device, isOverwritten };
@@ -125,5 +259,6 @@ const processOrCreateDeviceAlertInternal = async (alertData) => {
 };
 
 module.exports = {
-    processOrCreateDeviceAlert
+    processOrCreateDeviceAlert,
+    resolveOpenAlertsForDevice
 };

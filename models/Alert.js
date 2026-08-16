@@ -1,4 +1,4 @@
-const mongoose = require("mongoose");
+﻿const mongoose = require("mongoose");
 
 const alertSchema = new mongoose.Schema(
 {
@@ -7,9 +7,19 @@ const alertSchema = new mongoose.Schema(
         required: true
     },
 
+    deviceId: {
+        type: String
+    },
+
     device: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Device"
+    },
+
+    alertCategory: {
+        type: String,
+        enum: ["Need Attention", "Critical"],
+        required: true
     },
 
     alertType: {
@@ -25,8 +35,7 @@ const alertSchema = new mongoose.Schema(
     },
 
     alertSubtype: {
-        type: String,
-        enum: ["NA_1", "NA_2", "NA_3", "C_1", "C_2", "C_3", "C_4"]
+        type: String
     },
 
     rating: Number,
@@ -36,13 +45,27 @@ const alertSchema = new mongoose.Schema(
         enum: ["CLEAN", "NEEDS_ATTENTION", "CRITICAL"]
     },
 
-    description: String,
+    description: {
+        type: String,
+        required: true
+    },
 
     feedback: Number,
-
     Counter: Number,
-
     OdorSensVal: Number,
+
+    // Audit fields for historical retention
+    counterThreshold: Number,
+    odorThreshold: Number,
+    counterValue: Number,
+    odorValue: Number,
+    feedbackValue: Number,
+
+    counterSeverity: String,
+    odorSeverity: String,
+    feedbackSeverity: String,
+
+    triggeredValues: [String],
 
     status: {
         type: String,
@@ -63,8 +86,4 @@ const alertSchema = new mongoose.Schema(
     timestamps: true
 });
 
-module.exports =
-mongoose.model(
-    "Alert",
-    alertSchema
-);
+module.exports = mongoose.model("Alert", alertSchema);

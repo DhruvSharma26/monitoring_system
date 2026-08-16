@@ -122,6 +122,21 @@ const startTask = async (req, res) => {
             return res.status(404).json({ success: false, message: "Task not found" });
         }
 
+        // Validate that task is assigned to this staff member (if staff)
+        if (req.user && req.user.role === "staff" && task.staff && task.staff.toString() !== req.user.id.toString()) {
+            return res.status(403).json({
+                success: false,
+                message: "You are not authorized to start a task assigned to another staff member."
+            });
+        }
+
+        if (task.status === "IN_PROGRESS" || task.startedAt) {
+            return res.status(400).json({
+                success: false,
+                message: "Task has already been started."
+            });
+        }
+
         const now = new Date();
         task.status = "IN_PROGRESS";
         task.startedAt = now;
@@ -423,6 +438,14 @@ const reassignTask = async (req, res) => {
 
         if (!task) {
             return res.status(404).json({ success: false, message: "Task not found" });
+        }
+
+        // ENFORCE REASSIGNMENT LOCK: Cannot reassign if task has already been started
+        if (task.startedAt || task.status === "IN_PROGRESS" || task.status === "SUBMITTED" || task.status === "VERIFIED" || task.status === "COMPLETED") {
+            return res.status(400).json({
+                success: false,
+                message: "This task cannot be reassigned because it has already been started by the staff member."
+            });
         }
 
         if (!staffId) {

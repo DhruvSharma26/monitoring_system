@@ -1,98 +1,117 @@
-/**
- * Single Source of Truth Classification Matrix
+﻿/**
+ * Single Source of Truth Classification Engine
+ * Evaluates Counter, Odor, and Feedback against configured Admin Settings.
  */
 const classifyTelemetry = (feedbackVal, counterVal, odorVal, settings) => {
-    const counterThreshold = settings?.counterThreshold || 100;
-    const odorThreshold = settings?.odorThreshold || 80;
+    const counterThreshold = Number(settings?.counterThreshold) || 100;
+    const odorThreshold = Number(settings?.odorThreshold) || 200;
 
-    // Warning Thresholds are ALWAYS exactly 50% of Settings Thresholds
-    const counterWarning = counterThreshold * 0.5;
-    const odorWarning = odorThreshold * 0.5;
+    // 75% Need Attention Thresholds
+    const counterNeedAttentionThreshold = counterThreshold * 0.75;
+    const odorNeedAttentionThreshold = odorThreshold * 0.75;
 
     const counter = Number(counterVal) || 0;
     const odor = Number(odorVal) || 0;
-    const fb = Number(feedbackVal) || 1;
+    const feedback = (feedbackVal !== undefined && feedbackVal !== null) ? Number(feedbackVal) : 4;
 
-    // Comparison rules: <= warning is BELOW/WITHIN, > warning is ABOVE
-    const isCounterAbove = counter > counterWarning;
-    const isOdorAbove = odor > odorWarning;
+    // 1. Evaluate Counter Rule
+    let counterSeverity = "NONE";
+    if (counter > counterThreshold) {
+        counterSeverity = "CRITICAL";
+    } else if (counter > counterNeedAttentionThreshold) {
+        counterSeverity = "NEED_ATTENTION";
+    }
 
-    const bothBelowWithin = !isCounterAbove && !isOdorAbove;
-    const oneAboveOneBelow = (isCounterAbove && !isOdorAbove) || (!isCounterAbove && isOdorAbove);
-    const bothAbove = isCounterAbove && isOdorAbove;
+    // 2. Evaluate Odor Rule
+    let odorSeverity = "NONE";
+    if (odor > odorThreshold) {
+        odorSeverity = "CRITICAL";
+    } else if (odor > odorNeedAttentionThreshold) {
+        odorSeverity = "NEED_ATTENTION";
+    }
 
-    let rating = 5.0;
-    let status = "CLEAN";
-    let alertType = null;
-    let alertSubtype = null;
-    let description = null;
+    // 3. Evaluate Feedback Rule
+    let feedbackSeverity = "NONE";
+    if (feedback === 1 || feedback === 2) {
+        feedbackSeverity = "CRITICAL";
+    } else if (feedback === 3) {
+        feedbackSeverity = "NEED_ATTENTION";
+    } else if (feedback === 4) {
+        feedbackSeverity = "NONE";
+    }
 
-    if (fb === 1 || fb === 2) {
-        if (bothBelowWithin) {
-            rating = 5.0;
-            status = "CLEAN";
-        } else if (oneAboveOneBelow) {
-            rating = 4.5;
-            status = "CLEAN";
-        } else if (bothAbove) {
-            rating = 4.0;
-            status = "NEEDS_ATTENTION";
-            alertType = "NEEDS_ATTENTION";
-            alertSubtype = "NA_1";
-            description = "Positive feedback, but both monitored parameters are above their Warning Thresholds.";
-        }
-    } else if (fb === 3) {
-        if (bothBelowWithin) {
-            rating = 3.5;
-            status = "NEEDS_ATTENTION";
-            alertType = "NEEDS_ATTENTION";
-            alertSubtype = "NA_2";
-            description = "Moderate feedback, with both monitored parameters within their Warning Thresholds.";
-        } else if (oneAboveOneBelow) {
-            rating = 3.0;
-            status = "NEEDS_ATTENTION";
-            alertType = "NEEDS_ATTENTION";
-            alertSubtype = "NA_3";
-            description = "Moderate feedback, with one monitored parameter above its Warning Threshold.";
-        } else if (bothAbove) {
-            rating = 2.5;
-            status = "CRITICAL";
-            alertType = "CRITICAL";
-            alertSubtype = "C_1";
-            description = "Moderate feedback, with both monitored parameters above their Warning Thresholds.";
-        }
-    } else if (fb === 4) {
-        if (bothBelowWithin) {
-            rating = 2.0;
-            status = "CRITICAL";
-            alertType = "CRITICAL";
-            alertSubtype = "C_2";
-            description = "Poor feedback, although both monitored parameters are within their Warning Thresholds.";
-        } else if (oneAboveOneBelow) {
-            rating = 1.5;
-            status = "CRITICAL";
-            alertType = "CRITICAL";
-            alertSubtype = "C_3";
-            description = "Poor feedback, with one monitored parameter above its Warning Threshold.";
-        } else if (bothAbove) {
-            rating = 1.0;
-            status = "CRITICAL";
-            alertType = "CRITICAL";
-            alertSubtype = "C_4";
-            description = "Poor feedback, with both monitored parameters above their Warning Thresholds.";
-        }
+    // 4. Determine Overall Category & Priority (Critical > Need Attention > None)
+    let overallSeverity = "NONE";
+    if (counterSeverity === "CRITICAL" || odorSeverity === "CRITICAL" || feedbackSeverity === "CRITICAL") {
+        overallSeverity = "CRITICAL";
+    } else if (counterSeverity === "NEED_ATTENTION" || odorSeverity === "NEED_ATTENTION" || feedbackSeverity === "NEED_ATTENTION") {
+        overallSeverity = "NEED_ATTENTION";
+    }
+
+    const alertCategory = overallSeverity === "CRITICAL" ? "Critical" : (overallSeverity === "NEED_ATTENTION" ? "Need Attention" : null);
+    const alertType = overallSeverity === "CRITICAL" ? "CRITICAL" : (overallSeverity === "NEED_ATTENTION" ? "NEEDS_ATTENTION" : null);
+    const toiletStatus = overallSeverity === "CRITICAL" ? "CRITICAL" : (overallSeverity === "NEED_ATTENTION" ? "NEEDS_ATTENTION" : "CLEAN");
+
+    // 5. Generate Detailed Descriptions for ALL Triggered Conditions
+    const triggeredDescriptions = [];
+    const triggeredValues = [];
+
+    // Counter Description
+    if (counterSeverity === "CRITICAL") {
+        const diff = counter - counterThreshold;
+        triggeredDescriptions.push(`Counter value is ${counter}, exceeding the configured threshold of ${counterThreshold} by ${diff}.`);
+        triggeredValues.push("Counter");
+    } else if (counterSeverity === "NEED_ATTENTION") {
+        triggeredDescriptions.push(`Counter value is ${counter}, exceeding the Need Attention threshold of ${counterNeedAttentionThreshold}.`);
+        triggeredValues.push("Counter");
+    }
+
+    // Odor Description
+    if (odorSeverity === "CRITICAL") {
+        const diff = odor - odorThreshold;
+        triggeredDescriptions.push(`Odor value is ${odor} ppm, exceeding the configured threshold of ${odorThreshold} ppm by ${diff} ppm.`);
+        triggeredValues.push("Odor");
+    } else if (odorSeverity === "NEED_ATTENTION") {
+        triggeredDescriptions.push(`Odor value is ${odor} ppm, exceeding the Need Attention threshold of ${odorNeedAttentionThreshold} ppm.`);
+        triggeredValues.push("Odor");
+    }
+
+    // Feedback Description
+    if (feedbackSeverity === "CRITICAL") {
+        triggeredDescriptions.push(`Customer feedback rating is ${feedback}, indicating a Critical condition.`);
+        triggeredValues.push("Feedback");
+    } else if (feedbackSeverity === "NEED_ATTENTION") {
+        triggeredDescriptions.push(`Customer feedback rating is 3, indicating Need Attention.`);
+        triggeredValues.push("Feedback");
+    }
+
+    let description = "Device operating within normal thresholds.";
+    if (triggeredDescriptions.length > 0) {
+        const prefix = alertCategory ? `${alertCategory}: ` : "";
+        description = prefix + triggeredDescriptions.join(" ");
     }
 
     return {
-        rating,
-        status,
+        status: toiletStatus,
+        toiletStatus: toiletStatus,
+        alertCategory,
         alertType,
-        alertSubtype,
         description,
-        counterWarning,
-        odorWarning,
-        isCounterAbove,
-        isOdorAbove
+
+        counterSeverity,
+        odorSeverity,
+        feedbackSeverity,
+
+        counterValue: counter,
+        odorValue: odor,
+        feedbackValue: feedback,
+
+        counterThreshold,
+        odorThreshold,
+        counterNeedAttentionThreshold,
+        odorNeedAttentionThreshold,
+
+        triggeredValues
     };
 };
 

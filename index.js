@@ -42,6 +42,7 @@ require("./routes/alertRoutes");
 const reportRoutes =
 require("./routes/reportRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
+const assignmentRoutes = require("./routes/assignmentRoutes");
 const notificationService = require("./services/notificationService");
 const app = express();
 const server = http.createServer(app);
@@ -136,6 +137,7 @@ app.use(
 );
 app.use("/api/otp", otpRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/assignments", assignmentRoutes);
 
 app.get(["/", "/health", "/api/health"], (req, res) => {
   const mongoose = require("mongoose");
@@ -281,6 +283,19 @@ function connectMQTT() {
 
         // Always save historical data for graphs, reports, and average ratings
         await SensorData.create(sensorPayload);
+        try {
+          const ratingService = require("./services/ratingService");
+          await ratingService.recordParticularRating({
+            device_uid: du,
+            device: targetDev ? targetDev._id : null,
+            timestamp: recordTimestamp,
+            counter: sensorPayload.Counter,
+            odor: sensorPayload.OdorSensVal,
+            feedback: sensorPayload.feedback
+          });
+        } catch (rErr) {
+          console.log("Error recording particular rating:", rErr.message);
+        }
         console.log(`💾 Historical SensorData saved for device ${du} (date: ${dateStr})`);
 
         // Check if timestamp belongs to current day (IST)
@@ -313,7 +328,7 @@ function connectMQTT() {
           ? await Settings.findOne({ adminId: targetDev.adminId })
           : await Settings.findOne();
 
-        const settings = adminSettings || { counterThreshold: 100, odorThreshold: 80 };
+        const settings = adminSettings || { counterThreshold: 100, odorThreshold: 200 };
 
         const { classifyTelemetry } = require("./services/alertClassifier");
         const classification = classifyTelemetry(
@@ -323,34 +338,49 @@ function connectMQTT() {
           settings
         );
 
-        if (classification.status !== "CLEAN" && classification.alertType) {
-          const alertService = require("./services/alertService");
+        const alertService = require("./services/alertService");
+
+        if (classification.status !== "CLEAN" && classification.alertCategory) {
           const { alert: alertDoc, device: dev, isOverwritten } = await alertService.processOrCreateDeviceAlert({
             device_uid: sensorPayload.device_uid,
+            alertCategory: classification.alertCategory,
             alertType: classification.alertType,
-            alertSubtype: classification.alertSubtype,
-            rating: classification.rating,
             toiletStatus: classification.status,
             description: classification.description,
             feedback: sensorPayload.feedback,
             Counter: sensorPayload.Counter,
-            OdorSensVal: sensorPayload.OdorSensVal
+            OdorSensVal: sensorPayload.OdorSensVal,
+
+            counterThreshold: classification.counterThreshold,
+            odorThreshold: classification.odorThreshold,
+            counterValue: classification.counterValue,
+            odorValue: classification.odorValue,
+            feedbackValue: classification.feedbackValue,
+
+            counterSeverity: classification.counterSeverity,
+            odorSeverity: classification.odorSeverity,
+            feedbackSeverity: classification.feedbackSeverity,
+
+            triggeredValues: classification.triggeredValues
           });
+
+          const finalDev = dev || targetDev;
+          if (finalDev) {
+            finalDev.status = classification.status === "CRITICAL" ? "critical" : "warning";
+            await finalDev.save();
+          }
 
           const alertSocketData = {
             device_uid: sensorPayload.device_uid,
             alert_id: alertDoc._id,
+            category: classification.alertCategory,
             type: classification.alertType,
-            alertSubtype: classification.alertSubtype,
-            rating: classification.rating,
             status: classification.status,
             description: classification.description,
             message: classification.description,
             feedback: sensorPayload.feedback,
             isOverwritten: isOverwritten
           };
-
-          const finalDev = dev || targetDev;
 
           if (global.io) {
             global.io.emit("new_alert", alertSocketData);
@@ -362,8 +392,18 @@ function connectMQTT() {
             }
           }
 
-          // Send notifications to Admin and Assigned Staff (FCM Push, DB, Socket, Email)
-          await notificationService.handleMqttAlertNotification(sensorPayload, alertType, alertDoc);
+          try {
+            await notificationService.handleMqttAlertNotification(sensorPayload, classification.alertType, alertDoc);
+          } catch (nErr) {
+            console.log("Notification error:", nErr.message);
+          }
+        } else {
+          await alertService.resolveOpenAlertsForDevice(sensorPayload.device_uid);
+          if (targetDev) {
+            targetDev.status = "clean";
+            await targetDev.save();
+          }
+        }
         }
 
       } catch (error) {

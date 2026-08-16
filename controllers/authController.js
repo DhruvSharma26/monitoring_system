@@ -4,12 +4,45 @@ const Otp = require("../models/Otp");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
+// Helper function to generate unique, normalized Admin ID based on Admin Name + Company Name
+const generateUniqueAdminId = async (adminNameInput, companyNameInput) => {
+    const rawName = (adminNameInput || "ADMIN").trim();
+    const rawCompany = (companyNameInput || "COMPANY").trim();
+
+    const cleanName = rawName
+        .toUpperCase()
+        .replace(/[^A-Z0-9\s]/g, "")
+        .trim()
+        .replace(/\s+/g, "-");
+
+    const cleanCompany = rawCompany
+        .toUpperCase()
+        .replace(/[^A-Z0-9\s]/g, "")
+        .trim()
+        .replace(/\s+/g, "-");
+
+    const baseId = `${cleanName}-${cleanCompany}`.replace(/-+/g, "-");
+
+    let adminId = baseId;
+    let existing = await User.findOne({ userId: adminId });
+    let counter = 1;
+
+    while (existing) {
+        const suffix = String(counter).padStart(3, "0");
+        adminId = `${baseId}-${suffix}`;
+        existing = await User.findOne({ userId: adminId });
+        counter++;
+    }
+
+    return adminId;
+};
+
 const registerAdmin = async (req, res, next) => {
-
     try {
-
         const {
-            userId,
+            userId: providedUserId,
+            adminName,
+            name,
             companyName,
             country,
             contactPerson,
@@ -35,12 +68,10 @@ const registerAdmin = async (req, res, next) => {
         });
 
         if (!verifiedOtp) {
-
             return res.status(400).json({
                 success: false,
                 message: "Please verify OTP first"
             });
-
         }
 
         if (verifiedOtp.expiresAt < new Date()) {
@@ -55,61 +86,65 @@ const registerAdmin = async (req, res, next) => {
         });
 
         if (existingUser) {
-
             return res.status(400).json({
                 success: false,
-                message: "User already exists"
+                message: "User with this email already exists"
             });
-
         }
 
-        const existingId = await User.findOne({
-            userId
-        });
+        const resolvedAdminName = contactPerson || name || adminName || "Admin";
+        const resolvedCompany = companyName || "Company";
 
-        if (existingId) {
+        // Auto-generate Unique Admin ID
+        let generatedAdminId = await generateUniqueAdminId(resolvedAdminName, resolvedCompany);
 
-            return res.status(400).json({
-                success: false,
-                message: "User ID already exists"
-            });
+        const hashedPassword = await bcrypt.hash(password, 10);
 
+        let admin;
+        let retryCount = 0;
+        while (!admin && retryCount < 5) {
+            try {
+                admin = await User.create({
+                    userId: generatedAdminId,
+                    role: "admin",
+                    companyName: resolvedCompany,
+                    country,
+                    contactPerson: resolvedAdminName,
+                    name: resolvedAdminName,
+                    designation: designation || "Admin",
+                    email: normalizedEmail,
+                    mobile: mobile || "",
+                    alternateNumber,
+                    password: hashedPassword,
+                    isVerified: true
+                });
+            } catch (createErr) {
+                if (createErr.code === 11000 && createErr.keyPattern && createErr.keyPattern.userId) {
+                    retryCount++;
+                    const suffix = String(retryCount).padStart(3, "0");
+                    generatedAdminId = `${generatedAdminId}-${suffix}`;
+                } else {
+                    throw createErr;
+                }
+            }
         }
-
-        const hashedPassword =
-            await bcrypt.hash(password, 10);
-
-        const admin = await User.create({
-
-            userId,
-
-            role: "admin",
-
-            companyName,
-
-            country,
-
-            contactPerson,
-
-            designation,
-
-            email: normalizedEmail,
-
-            mobile,
-
-            alternateNumber,
-
-            password: hashedPassword,
-
-            isVerified: true
-        });
 
         await Otp.deleteMany({ email: normalizedEmail });
 
         res.status(201).json({
             success: true,
-            message: "Admin Registered",
-            userId: admin.userId
+            message: "Admin Registered Successfully",
+            adminId: admin.userId,
+            userId: admin.userId,
+            admin: {
+                adminId: admin.userId,
+                userId: admin.userId,
+                name: admin.name || admin.contactPerson,
+                contactPerson: admin.contactPerson,
+                companyName: admin.companyName,
+                email: admin.email,
+                mobile: admin.mobile
+            }
         });
 
     } catch (error) {
