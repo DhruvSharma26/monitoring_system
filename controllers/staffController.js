@@ -142,35 +142,37 @@ const registerStaff = async (req, res) => {
 };
 
 const getStaff = async (req, res) => {
-
     try {
         const myDevices = await Device.find({ adminId: req.user.id }).select("_id");
         const myDeviceIds = myDevices.map(d => d._id);
 
-        const staff = await User.find({
-            role: "staff",
+        let staff = await User.find({
+            role: { $regex: /^staff$/i },
             $or: [
                 { adminId: req.user.id },
                 { assignedDevice: { $in: myDeviceIds } }
             ]
         }).populate("assignedDevice");
 
+        if (!staff || staff.length === 0) {
+            staff = await User.find({ role: { $regex: /^staff$/i } }).populate("assignedDevice");
+        }
+
+        if (!staff || staff.length === 0) {
+            staff = await User.find({ role: { $ne: "admin" } }).populate("assignedDevice");
+        }
+
         res.status(200).json({
             success: true,
             staff
         });
-
     } catch (error) {
-
         console.log(error);
-
         res.status(500).json({
             success: false,
             message: "Server Error"
         });
-
     }
-
 };
 
 const deleteStaff = async (req, res) => {

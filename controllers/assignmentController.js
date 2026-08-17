@@ -37,14 +37,13 @@ const assignDevicesToStaff = async (req, res) => {
                 { userId: staffIdInput },
                 { email: staffIdInput },
                 { empId: staffIdInput }
-            ],
-            role: { $regex: /^staff$/i }
+            ]
         });
 
         if (!staff) {
             return res.status(404).json({
                 success: false,
-                message: "Staff member not found"
+                message: `Staff member not found for specified ID '${staffIdInput}'`
             });
         }
 
@@ -53,12 +52,15 @@ const assignDevicesToStaff = async (req, res) => {
         const createdAssignments = [];
 
         for (const devIdInput of deviceIdsArray) {
-            const isDevObjId = mongoose.Types.ObjectId.isValid(devIdInput);
+            const devClean = String(devIdInput).trim();
+            const isDevObjId = mongoose.Types.ObjectId.isValid(devClean);
             const device = await Device.findOne({
                 $or: [
-                    ...(isDevObjId ? [{ _id: devIdInput }] : []),
-                    { deviceId: devIdInput },
-                    { device_uid: devIdInput }
+                    ...(isDevObjId ? [{ _id: devClean }] : []),
+                    { deviceId: devClean },
+                    { device_uid: devClean },
+                    { deviceId: { $regex: new RegExp(`^${devClean.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i') } },
+                    { device_uid: { $regex: new RegExp(`^${devClean.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i') } }
                 ]
             });
 
@@ -113,7 +115,11 @@ const getAllAssignments = async (req, res) => {
         const staffMap = new Map();
 
         // Get all staff users
-        const allStaff = await User.find({ role: { $regex: /^staff$/i } }).select("name empId userId email mobile designation").lean();
+        let allStaff = await User.find({ role: { $regex: /^staff$/i } }).select("name empId userId email mobile designation").lean();
+        if (!allStaff || allStaff.length === 0) {
+            allStaff = await User.find({ role: { $ne: "admin" } }).select("name empId userId email mobile designation").lean();
+        }
+
         for (const s of allStaff) {
             staffMap.set(s._id.toString(), {
                 staff: s,
@@ -176,7 +182,7 @@ const getStaffAssignments = async (req, res) => {
         });
 
         if (!staff) {
-            return res.status(404).json({ success: false, message: "Staff not found" });
+            return res.status(404).json({ success: false, message: "Staff member not found" });
         }
 
         const assignments = await Assignment.find({ staff: staff._id, status: "ACTIVE" })
@@ -203,12 +209,15 @@ const unassignDevice = async (req, res) => {
             return res.status(400).json({ success: false, message: "Device ID is required" });
         }
 
-        const isDevObjId = mongoose.Types.ObjectId.isValid(targetDeviceId);
+        const devClean = String(targetDeviceId).trim();
+        const isDevObjId = mongoose.Types.ObjectId.isValid(devClean);
         const device = await Device.findOne({
             $or: [
-                ...(isDevObjId ? [{ _id: targetDeviceId }] : []),
-                { deviceId: targetDeviceId },
-                { device_uid: targetDeviceId }
+                ...(isDevObjId ? [{ _id: devClean }] : []),
+                { deviceId: devClean },
+                { device_uid: devClean },
+                { deviceId: { $regex: new RegExp(`^${devClean.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i') } },
+                { device_uid: { $regex: new RegExp(`^${devClean.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i') } }
             ]
         });
 
@@ -249,12 +258,15 @@ const reassignDevice = async (req, res) => {
             return res.status(400).json({ success: false, message: "Device ID and new Staff ID are required" });
         }
 
-        const isDevObjId = mongoose.Types.ObjectId.isValid(deviceIdInput);
+        const devClean = String(deviceIdInput).trim();
+        const isDevObjId = mongoose.Types.ObjectId.isValid(devClean);
         const device = await Device.findOne({
             $or: [
-                ...(isDevObjId ? [{ _id: deviceIdInput }] : []),
-                { deviceId: deviceIdInput },
-                { device_uid: deviceIdInput }
+                ...(isDevObjId ? [{ _id: devClean }] : []),
+                { deviceId: devClean },
+                { device_uid: devClean },
+                { deviceId: { $regex: new RegExp(`^${devClean.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i') } },
+                { device_uid: { $regex: new RegExp(`^${devClean.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i') } }
             ]
         });
 
@@ -269,8 +281,7 @@ const reassignDevice = async (req, res) => {
                 { userId: newStaffIdInput },
                 { email: newStaffIdInput },
                 { empId: newStaffIdInput }
-            ],
-            role: { $regex: /^staff$/i }
+            ]
         });
 
         if (!newStaff) {
