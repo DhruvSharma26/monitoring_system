@@ -81,9 +81,44 @@ const assignDevicesToStaff = async (req, res) => {
                 assignedAt: now
             });
 
+            const oldStaffId = device.assignedStaff ? device.assignedStaff.toString() : null;
             // Update Device's assignedStaff pointer
             device.assignedStaff = staff._id;
             await device.save();
+
+            // Reassign open tasks for this device if staff changed
+            if (oldStaffId && oldStaffId !== staff._id.toString()) {
+                try {
+                    const Task = require("../models/Task");
+                    const notificationService = require("../services/notificationService");
+                    const oldStaffUser = await User.findById(oldStaffId);
+                    const openTasks = await Task.find({ device: device._id, status: "ASSIGNED", startedAt: { $exists: false } });
+
+                    for (const openTask of openTasks) {
+                        if (openTask.staff && !openTask.startedAt && openTask.staff.toString() !== staff._id.toString()) {
+                            const taskOldStaffId = openTask.staff.toString();
+                            const taskOldStaffUser = taskOldStaffId === oldStaffId ? oldStaffUser : await User.findById(taskOldStaffId);
+
+                            openTask.staff = staff._id;
+                            openTask.reassignedAt = now;
+                            openTask.timeline.push({
+                                status: "REASSIGNED",
+                                timestamp: now,
+                                prevStaff: taskOldStaffId,
+                                newStaff: staff._id.toString(),
+                                notes: `Reassigned due to device assignment change to ${staff.name || staff.userId}`
+                            });
+                            await openTask.save();
+
+                            if (taskOldStaffUser && staff) {
+                                await notificationService.sendTaskReassignedNotification(openTask, taskOldStaffUser, staff, device);
+                            }
+                        }
+                    }
+                } catch (tErr) {
+                    console.log("Error reassigning open tasks during device assignment:", tErr.message);
+                }
+            }
 
             createdAssignments.push(newAssignment);
         }
@@ -325,6 +360,7 @@ const reassignDevice = async (req, res) => {
 
         const now = new Date();
         const adminId = req.user ? (req.user.id || req.user._id) : null;
+        const oldStaffId = device.assignedStaff ? device.assignedStaff.toString() : null;
 
         // Deactivate current active assignments
         await Assignment.updateMany(
@@ -343,6 +379,40 @@ const reassignDevice = async (req, res) => {
 
         device.assignedStaff = newStaff._id;
         await device.save();
+
+        // Reassign any open tasks for this device if assigned staff changed
+        if (oldStaffId && oldStaffId !== newStaff._id.toString()) {
+            try {
+                const Task = require("../models/Task");
+                const notificationService = require("../services/notificationService");
+                const oldStaffUser = await User.findById(oldStaffId);
+                const openTasks = await Task.find({ device: device._id, status: "ASSIGNED", startedAt: { $exists: false } });
+
+                for (const openTask of openTasks) {
+                    if (openTask.staff && !openTask.startedAt && openTask.staff.toString() !== newStaff._id.toString()) {
+                        const taskOldStaffId = openTask.staff.toString();
+                        const taskOldStaffUser = taskOldStaffId === oldStaffId ? oldStaffUser : await User.findById(taskOldStaffId);
+
+                        openTask.staff = newStaff._id;
+                        openTask.reassignedAt = now;
+                        openTask.timeline.push({
+                            status: "REASSIGNED",
+                            timestamp: now,
+                            prevStaff: taskOldStaffId,
+                            newStaff: newStaff._id.toString(),
+                            notes: `Reassigned due to device reassignment to ${newStaff.name || newStaff.userId}`
+                        });
+                        await openTask.save();
+
+                        if (taskOldStaffUser && newStaff) {
+                            await notificationService.sendTaskReassignedNotification(openTask, taskOldStaffUser, newStaff, device);
+                        }
+                    }
+                }
+            } catch (tErr) {
+                console.log("Error reassigning open tasks during device reassignment:", tErr.message);
+            }
+        }
 
         if (global.io) {
             global.io.emit("assignments_updated", { deviceId: device._id, newStaffId: newStaff._id });

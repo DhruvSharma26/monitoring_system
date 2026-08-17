@@ -327,7 +327,12 @@ function connectMQTT() {
           $or: [{ device_uid: sensorPayload.device_uid }, { deviceId: sensorPayload.device_uid }]
         });
 
-        const adminSettings = (targetDev && targetDev.adminId)
+        if (!targetDev) {
+          console.log(`ℹ️ MQTT payload timestamp [${payload.timestamp}] for unknown/deleted device [${sensorPayload.device_uid}] — skipping alert creation & notifications.`);
+          return;
+        }
+
+        const adminSettings = targetDev.adminId
           ? await Settings.findOne({ adminId: targetDev.adminId })
           : await Settings.findOne();
 

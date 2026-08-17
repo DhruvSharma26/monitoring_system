@@ -106,11 +106,16 @@ const processOrCreateDeviceAlertInternal = async (alertData) => {
             $or: [{ device_uid: devRegex }, { deviceId: devRegex }]
         });
 
-        const targetUid = device ? device.device_uid : devUid;
-        const targetDevId = device ? device.deviceId : devUid;
+        if (!device) {
+            console.log(`⚠️ processOrCreateDeviceAlert: Device not found for [${devUid}] — skipping alert processing.`);
+            return null;
+        }
 
-        let assignedStaffId = device ? (device.assignedStaff || null) : null;
-        if (!assignedStaffId && device) {
+        const targetUid = device.device_uid;
+        const targetDevId = device.deviceId;
+
+        let assignedStaffId = device.assignedStaff || null;
+        if (!assignedStaffId) {
             const activeAsgn = await Assignment.findOne({ device: device._id, status: "ACTIVE" });
             if (activeAsgn) assignedStaffId = activeAsgn.staff;
         }
@@ -247,11 +252,39 @@ const processOrCreateDeviceAlertInternal = async (alertData) => {
 
                 if (global.io) {
                     global.io.emit("new_task", { taskId: newTask._id, status: "ASSIGNED", staffId: assignedStaffId });
-                    global.io.emit("task_status_updated", { taskId: newTask._id, status: "ASSIGNED", staffId: assignedStaffId });
                 }
-            } else if (existingTask.status === "ASSIGNED" && existingTask.staff.toString() !== assignedStaffId.toString()) {
+            } else if (existingTask.status === "ASSIGNED" && !existingTask.startedAt && existingTask.staff.toString() !== assignedStaffId.toString()) {
+                const oldStaffId = existingTask.staff ? existingTask.staff.toString() : null;
+                const oldStaffUser = oldStaffId ? await User.findById(oldStaffId) : null;
+                const newStaffUser = await User.findById(assignedStaffId);
+                const now = new Date();
+
                 existingTask.staff = assignedStaffId;
+                existingTask.reassignedAt = now;
+                existingTask.timeline.push({
+                    status: "REASSIGNED",
+                    timestamp: now,
+                    prevStaff: oldStaffId,
+                    newStaff: assignedStaffId.toString(),
+                    notes: "Automatically reassigned based on device ownership"
+                });
                 await existingTask.save();
+
+                try {
+                    const notificationService = require("./notificationService");
+                    if (oldStaffUser && newStaffUser) {
+                        await notificationService.sendTaskReassignedNotification(existingTask, oldStaffUser, newStaffUser, device);
+                    } else if (newStaffUser) {
+                        await notificationService.sendTaskAssignedNotification(existingTask, newStaffUser, null, device);
+                    }
+                } catch (nErr) {
+                    console.log("Error sending automatic task reassignment notification:", nErr.message);
+                }
+
+                if (global.io) {
+                    global.io.emit("task_reassigned", { taskId: existingTask._id, status: "ASSIGNED", staffId: assignedStaffId });
+                    global.io.emit("task_status_updated", { taskId: existingTask._id, status: "ASSIGNED", staffId: assignedStaffId });
+                }
             }
         }
 

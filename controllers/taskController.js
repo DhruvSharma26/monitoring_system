@@ -464,6 +464,11 @@ const reassignTask = async (req, res) => {
 
         const now = new Date();
         const prevStaffId = task.staff ? task.staff.toString() : null;
+        let oldStaffUser = null;
+        if (prevStaffId && mongoose.Types.ObjectId.isValid(prevStaffId)) {
+            oldStaffUser = await User.findById(prevStaffId);
+        }
+
         const isSameStaff = prevStaffId ? (prevStaffId === staff._id.toString()) : false;
 
         task.staff = staff._id;
@@ -509,7 +514,11 @@ const reassignTask = async (req, res) => {
 
         try {
             const notificationService = require("../services/notificationService");
-            notificationService.sendTaskAssignedNotification(task, staff, req.user, device);
+            if (prevStaffId && oldStaffUser && !isSameStaff) {
+                await notificationService.sendTaskReassignedNotification(task, oldStaffUser, staff, device);
+            } else if (!prevStaffId && !isSameStaff) {
+                await notificationService.sendTaskAssignedNotification(task, staff, req.user, device);
+            }
         } catch (err) {
             console.log("Error sending task reassignment notification:", err.message);
         }

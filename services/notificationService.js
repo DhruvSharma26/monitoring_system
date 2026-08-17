@@ -16,12 +16,17 @@ async function handleMqttAlertNotification(sensorPayload, alertType, alertDoc) {
             $or: [{ device_uid: deviceUid }, { deviceId: deviceUid }]
         });
 
+        if (!device) {
+            console.log(`⚠️ handleMqttAlertNotification: Device not found for ${deviceUid} — skipping notification.`);
+            return;
+        }
+
         // 2. Identify Recipient Users (Targeted ONLY to Admin who registered the device & Assigned Staff)
         const recipientUserIds = new Set();
         const recipients = [];
 
         // A. Find Admin who registered this specific device
-        if (device && device.adminId) {
+        if (device.adminId) {
             const adminUser = await User.findById(device.adminId);
             if (adminUser) {
                 recipientUserIds.add(adminUser._id.toString());
@@ -31,24 +36,15 @@ async function handleMqttAlertNotification(sensorPayload, alertType, alertDoc) {
 
         // B. Find Assigned Staff for this specific device
         let assignedStaffUser = null;
-        if (device && device.assignedStaff) {
+        if (device.assignedStaff) {
             assignedStaffUser = await User.findById(device.assignedStaff);
         }
-        if (!assignedStaffUser && device) {
+        if (!assignedStaffUser) {
             assignedStaffUser = await User.findOne({ role: "staff", assignedDevice: device._id });
         }
         if (assignedStaffUser && !recipientUserIds.has(assignedStaffUser._id.toString())) {
             recipientUserIds.add(assignedStaffUser._id.toString());
             recipients.push(assignedStaffUser);
-        }
-
-        // Fallback ONLY if device has no registered admin (legacy/unassigned devices)
-        if (recipients.length === 0 && (!device || !device.adminId)) {
-            const firstAdmin = await User.findOne({ role: "admin" });
-            if (firstAdmin) {
-                recipientUserIds.add(firstAdmin._id.toString());
-                recipients.push(firstAdmin);
-            }
         }
 
         if (recipients.length === 0) {
@@ -392,6 +388,142 @@ async function sendTaskRejectedNotification(taskDoc, staffUser, adminUser, devic
 }
 
 /**
+ * Send notification when an existing task is reassigned from one staff member to another.
+ * Notifies BOTH the old staff member (TASK_REASSIGNED_FROM_YOU) and new staff member (TASK_REASSIGNED_TO_YOU).
+ */
+async function sendTaskReassignedNotification(taskDoc, oldStaffUser, newStaffUser, deviceDoc) {
+    try {
+        if (!oldStaffUser && !newStaffUser) return;
+        const deviceUid = deviceDoc ? deviceDoc.device_uid : (taskDoc ? taskDoc.device_uid : "N/A");
+        const locationText = deviceDoc?.location || deviceDoc?.locationName || 'N/A';
+
+        // 1. Notify OLD Staff Member (if valid user object)
+        if (oldStaffUser && oldStaffUser._id) {
+            const oldTitle = "📋 Task Reassigned";
+            const oldMessage = `Your task for device ${deviceUid} (${locationText}) has been reassigned to another staff member.`;
+
+            // Save DB Notification
+            const dbNotifOld = await Notification.create({
+                recipient: oldStaffUser._id,
+                recipientRole: "staff",
+                alert: taskDoc ? taskDoc.alert : null,
+                device_uid: deviceUid,
+                device: deviceDoc ? deviceDoc._id : null,
+                title: oldTitle,
+                message: oldMessage,
+                type: "TASK_REASSIGNED_FROM_YOU"
+            });
+
+            // Collect & Deduplicate FCM Tokens
+            let oldTokens = [];
+            if (oldStaffUser.fcmToken) oldTokens.push(oldStaffUser.fcmToken);
+            if (Array.isArray(oldStaffUser.fcmTokens)) oldTokens.push(...oldStaffUser.fcmTokens);
+            oldTokens = Array.from(new Set(oldTokens.filter(Boolean)));
+
+            if (oldTokens.length > 0) {
+                const adminUsers = await User.find({ role: "admin", $or: [{ fcmToken: { $in: oldTokens } }, { fcmTokens: { $in: oldTokens } }] }).select("fcmToken fcmTokens").lean();
+                const adminTokensSet = new Set(adminUsers.flatMap(a => [a.fcmToken, ...(a.fcmTokens || [])].filter(Boolean)));
+                oldTokens = oldTokens.filter(t => !adminTokensSet.has(t));
+            }
+
+            if (oldTokens.length > 0) {
+                await sendPushNotification({
+                    tokens: oldTokens,
+                    title: oldTitle,
+                    body: oldMessage,
+                    data: {
+                        taskId: taskDoc._id.toString(),
+                        alertId: taskDoc.alert ? taskDoc.alert.toString() : "",
+                        device_uid: deviceUid,
+                        notificationId: dbNotifOld._id.toString(),
+                        type: "TASK_REASSIGNED_FROM_YOU"
+                    }
+                });
+            }
+
+            // Targeted Socket.io Emission to Old Staff
+            if (global.io) {
+                const socketPayloadOld = {
+                    ...dbNotifOld.toObject(),
+                    taskId: taskDoc._id.toString(),
+                    notificationId: dbNotifOld._id.toString()
+                };
+                global.io.to(`user_${oldStaffUser._id}`).emit("new_notification", socketPayloadOld);
+                global.io.to(`user_${oldStaffUser._id}`).emit("user_notification", socketPayloadOld);
+                global.io.to(`user_${oldStaffUser._id}`).emit("task_reassigned", {
+                    taskId: taskDoc._id,
+                    status: "REASSIGNED",
+                    role: "OLD_STAFF"
+                });
+            }
+        }
+
+        // 2. Notify NEW Staff Member (if valid user object)
+        if (newStaffUser && newStaffUser._id) {
+            const newTitle = "📋 Task Reassigned to You";
+            const newMessage = `A task for device ${deviceUid} (${locationText}) has been reassigned to you.`;
+
+            // Save DB Notification
+            const dbNotifNew = await Notification.create({
+                recipient: newStaffUser._id,
+                recipientRole: "staff",
+                alert: taskDoc ? taskDoc.alert : null,
+                device_uid: deviceUid,
+                device: deviceDoc ? deviceDoc._id : null,
+                title: newTitle,
+                message: newMessage,
+                type: "TASK_REASSIGNED_TO_YOU"
+            });
+
+            // Collect & Deduplicate FCM Tokens
+            let newTokens = [];
+            if (newStaffUser.fcmToken) newTokens.push(newStaffUser.fcmToken);
+            if (Array.isArray(newStaffUser.fcmTokens)) newTokens.push(...newStaffUser.fcmTokens);
+            newTokens = Array.from(new Set(newTokens.filter(Boolean)));
+
+            if (newTokens.length > 0) {
+                const adminUsers = await User.find({ role: "admin", $or: [{ fcmToken: { $in: newTokens } }, { fcmTokens: { $in: newTokens } }] }).select("fcmToken fcmTokens").lean();
+                const adminTokensSet = new Set(adminUsers.flatMap(a => [a.fcmToken, ...(a.fcmTokens || [])].filter(Boolean)));
+                newTokens = newTokens.filter(t => !adminTokensSet.has(t));
+            }
+
+            if (newTokens.length > 0) {
+                await sendPushNotification({
+                    tokens: newTokens,
+                    title: newTitle,
+                    body: newMessage,
+                    data: {
+                        taskId: taskDoc._id.toString(),
+                        alertId: taskDoc.alert ? taskDoc.alert.toString() : "",
+                        device_uid: deviceUid,
+                        notificationId: dbNotifNew._id.toString(),
+                        type: "TASK_REASSIGNED_TO_YOU"
+                    }
+                });
+            }
+
+            // Targeted Socket.io Emission to New Staff
+            if (global.io) {
+                const socketPayloadNew = {
+                    ...dbNotifNew.toObject(),
+                    taskId: taskDoc._id.toString(),
+                    notificationId: dbNotifNew._id.toString()
+                };
+                global.io.to(`user_${newStaffUser._id}`).emit("new_notification", socketPayloadNew);
+                global.io.to(`user_${newStaffUser._id}`).emit("user_notification", socketPayloadNew);
+                global.io.to(`user_${newStaffUser._id}`).emit("task_reassigned", {
+                    taskId: taskDoc._id,
+                    status: "ASSIGNED",
+                    role: "NEW_STAFF"
+                });
+            }
+        }
+    } catch (error) {
+        console.log("❌ sendTaskReassignedNotification Error:", error.message);
+    }
+}
+
+/**
  * Automatically mark all unread notifications read for a given alertId when the alert is resolved or verified.
  */
 async function markNotificationsReadForAlert(alertId) {
@@ -413,5 +545,6 @@ module.exports = {
     sendTaskSubmittedNotification,
     sendTaskVerifiedNotification,
     sendTaskRejectedNotification,
+    sendTaskReassignedNotification,
     markNotificationsReadForAlert
 };

@@ -198,15 +198,50 @@ const deleteDevice = async (req, res) => {
             });
         }
 
-        // Unassign staff associated with device
+        const now = new Date();
+
+        // 1. Deactivate active Assignment records for this device
+        const Assignment = require("../models/Assignment");
+        await Assignment.updateMany(
+            { device: device._id, status: "ACTIVE" },
+            { $set: { status: "INACTIVE", unassignedAt: now } }
+        );
+
+        // 2. Unassign staff associated with device in User collection
         await User.updateMany(
             { assignedDevice: device._id },
             { $unset: { assignedDevice: 1 } }
         );
 
-        // Delete latest status and device
+        // 3. Cancel unstarted active tasks for deleted device so staff no longer see/act on them
+        const Task = require("../models/Task");
+        const openTasks = await Task.find({ device: device._id, status: "ASSIGNED", startedAt: { $exists: false } });
+        for (const t of openTasks) {
+            t.status = "CANCELLED";
+            t.timeline.push({
+                status: "CANCELLED",
+                timestamp: now,
+                updatedBy: req.user ? req.user.id : null,
+                notes: "Task cancelled automatically due to device deletion by admin"
+            });
+            await t.save();
+        }
+
+        // 4. Resolve active open alerts for deleted device so they no longer generate operational actions
+        const Alert = require("../models/Alert");
+        await Alert.updateMany(
+            { $or: [{ device: device._id }, { device_uid: device.device_uid }], status: { $in: ["OPEN", "ASSIGNED"] } },
+            { $set: { status: "RESOLVED", resolvedAt: now } }
+        );
+
+        // 5. Delete latest status and device record
         await LatestDeviceStatus.deleteMany({ device_uid: device.device_uid });
         await Device.findByIdAndDelete(device._id);
+
+        if (global.io) {
+            global.io.emit("device_deleted", { deviceId: device._id, device_uid: device.device_uid });
+            global.io.emit("assignments_updated", { deviceId: device._id });
+        }
 
         res.status(200).json({
             success: true,
