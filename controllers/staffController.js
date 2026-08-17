@@ -143,32 +143,55 @@ const registerStaff = async (req, res) => {
 
 const getStaff = async (req, res) => {
     try {
-        const myDevices = await Device.find({ adminId: req.user.id }).select("_id");
-        const myDeviceIds = myDevices.map(d => d._id);
+        const adminId = req.user ? (req.user.id || req.user._id) : null;
+        
+        let staff = [];
 
-        let staff = await User.find({
-            role: { $regex: /^staff$/i },
-            $or: [
-                { adminId: req.user.id },
-                { assignedDevice: { $in: myDeviceIds } }
-            ]
-        }).populate("assignedDevice");
+        if (adminId) {
+            const isObjectId = mongoose.Types.ObjectId.isValid(adminId);
+            const myDevices = await Device.find({
+                $or: [
+                    { adminId: adminId },
+                    ...(isObjectId ? [{ adminId: new mongoose.Types.ObjectId(adminId) }] : [])
+                ]
+            }).select("_id");
+            const myDeviceIds = myDevices.map(d => d._id);
 
-        if (!staff || staff.length === 0) {
-            staff = await User.find({ role: { $regex: /^staff$/i } }).populate("assignedDevice");
+            staff = await User.find({
+                role: { $regex: /^staff$/i },
+                $or: [
+                    { adminId: adminId },
+                    { admin_id: adminId },
+                    { admin: adminId },
+                    { created_by: adminId },
+                    ...(isObjectId ? [
+                        { adminId: new mongoose.Types.ObjectId(adminId) },
+                        { admin_id: new mongoose.Types.ObjectId(adminId) },
+                        { admin: new mongoose.Types.ObjectId(adminId) }
+                    ] : []),
+                    { assignedDevice: { $in: myDeviceIds } }
+                ]
+            }).populate("assignedDevice").lean();
         }
 
+        // Fallback: If no staff matched the admin ID criteria, fetch ALL staff members in the system
         if (!staff || staff.length === 0) {
-            staff = await User.find({ role: { $ne: "admin" } }).populate("assignedDevice");
+            staff = await User.find({ role: { $regex: /^staff$/i } }).populate("assignedDevice").lean();
         }
 
-        res.status(200).json({
+        // Final Fallback: Fetch all non-admin users
+        if (!staff || staff.length === 0) {
+            staff = await User.find({ role: { $ne: "admin" } }).populate("assignedDevice").lean();
+        }
+
+        return res.status(200).json({
             success: true,
+            count: staff.length,
             staff
         });
     } catch (error) {
-        console.log(error);
-        res.status(500).json({
+        console.log("Error in getStaff:", error);
+        return res.status(500).json({
             success: false,
             message: "Server Error"
         });
