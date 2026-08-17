@@ -284,6 +284,11 @@ function connectMQTT() {
           OdorSensVal: o !== undefined ? Number(o) : undefined
         };
 
+        const devRegex = new RegExp(`^${du.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i');
+        const targetDev = await Device.findOne({
+          $or: [{ device_uid: devRegex }, { deviceId: devRegex }]
+        });
+
         // Always save historical data for graphs, reports, and average ratings
         await SensorData.create(sensorPayload);
         try {
@@ -323,10 +328,6 @@ function connectMQTT() {
         }
 
         // 2. Evaluate Alerts & Thresholds for Current-Day Events
-        const targetDev = await Device.findOne({
-          $or: [{ device_uid: sensorPayload.device_uid }, { deviceId: sensorPayload.device_uid }]
-        });
-
         if (!targetDev) {
           console.log(`ℹ️ MQTT payload timestamp [${payload.timestamp}] for unknown/deleted device [${sensorPayload.device_uid}] — skipping alert creation & notifications.`);
           return;

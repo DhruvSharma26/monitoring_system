@@ -98,18 +98,52 @@ const getAlerts = async (req, res) => {
                 return res.status(200).json({ success: true, count: 0, alerts: [] });
             }
 
-        } else {
-            // Admin / System-wide View: Fetch ALL devices and ALL alerts in the system so no device or card is ever hidden
-            myDevices = await Device.find()
-                .populate("assignedStaff", "name empId userId email")
-                .select("_id device_uid deviceId location floor locationName assignedStaff adminId")
-                .lean();
+        } else if (req.user && (req.user.role === 'admin' || req.user.id)) {
+            const adminIdVal = req.user.id || req.user._id;
+            const isObjectId = mongoose.Types.ObjectId.isValid(adminIdVal);
 
-            if (categoryConditions.length > 0) {
-                query = { $or: categoryConditions };
-            } else {
-                query = {};
+            // Admin MUST ONLY see devices registered by that specific admin
+            myDevices = await Device.find({
+                $or: [
+                    { adminId: adminIdVal },
+                    ...(isObjectId ? [{ adminId: new mongoose.Types.ObjectId(adminIdVal) }] : [])
+                ]
+            })
+            .populate("assignedStaff", "name empId userId email")
+            .select("_id device_uid deviceId location floor locationName assignedStaff adminId")
+            .lean();
+
+            if (myDevices.length === 0) {
+                return res.status(200).json({ success: true, count: 0, alerts: [], data: [] });
             }
+
+            const alertConditions = [];
+            const adminDeviceUids = [];
+            myDevices.forEach(d => {
+                if (d.device_uid) adminDeviceUids.push(d.device_uid);
+                if (d.deviceId) adminDeviceUids.push(d.deviceId);
+            });
+            const uniqueAdminUids = Array.from(new Set(adminDeviceUids.filter(Boolean)));
+            if (uniqueAdminUids.length > 0) {
+                const regexUids = uniqueAdminUids.map(u => new RegExp(`^${u.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'));
+                alertConditions.push({ device_uid: { $in: regexUids } });
+                alertConditions.push({ deviceId: { $in: regexUids } });
+            }
+            if (myDevices.length > 0) {
+                alertConditions.push({ device: { $in: myDevices.map(d => d._id) } });
+            }
+
+            if (alertConditions.length > 0) {
+                if (categoryConditions.length > 0) {
+                    query = { $and: [{ $or: alertConditions }, { $or: categoryConditions }] };
+                } else {
+                    query = { $or: alertConditions };
+                }
+            } else {
+                return res.status(200).json({ success: true, count: 0, alerts: [], data: [] });
+            }
+        } else {
+            return res.status(200).json({ success: true, count: 0, alerts: [], data: [] });
         }
 
         const deviceMap = {};
@@ -444,8 +478,12 @@ const getAlerts = async (req, res) => {
             }
         }
 
-        // Sort all merged alerts/tasks by createdAt descending
-        finalAlerts.sort((a, b) => new Date(b.createdAt || b.assignedAt) - new Date(a.createdAt || a.assignedAt));
+        // Sort all merged alerts/tasks by timestamp descending (newest first)
+        finalAlerts.sort((a, b) => {
+            const timeA = new Date(a.createdAt || a.timestamp || a.assignedAt || a.updatedAt || 0).getTime();
+            const timeB = new Date(b.createdAt || b.timestamp || b.assignedAt || b.updatedAt || 0).getTime();
+            return timeB - timeA;
+        });
 
         res.status(200).json({
             success: true,
