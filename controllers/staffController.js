@@ -144,11 +144,11 @@ const registerStaff = async (req, res) => {
 const getStaff = async (req, res) => {
     try {
         const adminId = req.user ? (req.user.id || req.user._id) : null;
-        
+        const isObjectId = mongoose.Types.ObjectId.isValid(adminId);
+
         let staff = [];
 
         if (adminId) {
-            const isObjectId = mongoose.Types.ObjectId.isValid(adminId);
             const myDevices = await Device.find({
                 $or: [
                     { adminId: adminId },
@@ -158,7 +158,6 @@ const getStaff = async (req, res) => {
             const myDeviceIds = myDevices.map(d => d._id);
 
             staff = await User.find({
-                role: { $regex: /^staff$/i },
                 $or: [
                     { adminId: adminId },
                     { admin_id: adminId },
@@ -174,20 +173,33 @@ const getStaff = async (req, res) => {
             }).populate("assignedDevice").lean();
         }
 
-        // Fallback: If no staff matched the admin ID criteria, fetch ALL staff members in the system
-        if (!staff || staff.length === 0) {
-            staff = await User.find({ role: { $regex: /^staff$/i } }).populate("assignedDevice").lean();
+        // Also fetch all users with role matching staff (case-insensitive)
+        const allStaffRoleUsers = await User.find({ role: { $regex: /^staff$/i } }).populate("assignedDevice").lean();
+        
+        const staffMap = new Map();
+        for (const s of staff) {
+            if (s && s._id) staffMap.set(s._id.toString(), s);
+        }
+        for (const s of allStaffRoleUsers) {
+            if (s && s._id && !staffMap.has(s._id.toString())) {
+                staffMap.set(s._id.toString(), s);
+            }
         }
 
-        // Final Fallback: Fetch all non-admin users
-        if (!staff || staff.length === 0) {
-            staff = await User.find({ role: { $ne: "admin" } }).populate("assignedDevice").lean();
+        // Final fallback if staffMap is empty: fetch non-admin users
+        if (staffMap.size === 0) {
+            const nonAdmins = await User.find({ role: { $ne: "admin" } }).populate("assignedDevice").lean();
+            for (const s of nonAdmins) {
+                if (s && s._id) staffMap.set(s._id.toString(), s);
+            }
         }
+
+        const result = Array.from(staffMap.values());
 
         return res.status(200).json({
             success: true,
-            count: staff.length,
-            staff
+            count: result.length,
+            staff: result
         });
     } catch (error) {
         console.log("Error in getStaff:", error);
