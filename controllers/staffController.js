@@ -158,6 +158,7 @@ const getStaff = async (req, res) => {
             const myDeviceIds = myDevices.map(d => d._id);
 
             staff = await User.find({
+                role: { $regex: /^staff$/i },
                 $or: [
                     { adminId: adminId },
                     { admin_id: adminId },
@@ -173,33 +174,16 @@ const getStaff = async (req, res) => {
             }).populate("assignedDevice").lean();
         }
 
-        // Also fetch all users with role matching staff (case-insensitive)
-        const allStaffRoleUsers = await User.find({ role: { $regex: /^staff$/i } }).populate("assignedDevice").lean();
-        
-        const staffMap = new Map();
-        for (const s of staff) {
-            if (s && s._id) staffMap.set(s._id.toString(), s);
+        // Fallback: If no staff explicitly matched this adminId (e.g. legacy records without adminId field),
+        // fallback to staff members in the platform
+        if (!staff || staff.length === 0) {
+            staff = await User.find({ role: { $regex: /^staff$/i } }).populate("assignedDevice").lean();
         }
-        for (const s of allStaffRoleUsers) {
-            if (s && s._id && !staffMap.has(s._id.toString())) {
-                staffMap.set(s._id.toString(), s);
-            }
-        }
-
-        // Final fallback if staffMap is empty: fetch non-admin users
-        if (staffMap.size === 0) {
-            const nonAdmins = await User.find({ role: { $ne: "admin" } }).populate("assignedDevice").lean();
-            for (const s of nonAdmins) {
-                if (s && s._id) staffMap.set(s._id.toString(), s);
-            }
-        }
-
-        const result = Array.from(staffMap.values());
 
         return res.status(200).json({
             success: true,
-            count: result.length,
-            staff: result
+            count: staff.length,
+            staff
         });
     } catch (error) {
         console.log("Error in getStaff:", error);

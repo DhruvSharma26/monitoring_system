@@ -107,20 +107,62 @@ const assignDevicesToStaff = async (req, res) => {
 // Get all assignments grouped by staff
 const getAllAssignments = async (req, res) => {
     try {
-        const activeAssignments = await Assignment.find({ status: "ACTIVE" })
+        const adminId = req.user ? (req.user.id || req.user._id) : null;
+        const isObjectId = mongoose.Types.ObjectId.isValid(adminId);
+
+        let myDevices = [];
+        if (adminId) {
+            myDevices = await Device.find({
+                $or: [
+                    { adminId: adminId },
+                    ...(isObjectId ? [{ adminId: new mongoose.Types.ObjectId(adminId) }] : [])
+                ]
+            }).select("_id deviceId device_uid locationName location floor status");
+
+            if (myDevices.length === 0) {
+                myDevices = await Device.find().select("_id deviceId device_uid locationName location floor status");
+            }
+        } else {
+            myDevices = await Device.find().select("_id deviceId device_uid locationName location floor status");
+        }
+        
+        const myDeviceIds = myDevices.map(d => d._id);
+
+        let adminStaff = [];
+        if (adminId) {
+            adminStaff = await User.find({
+                role: { $regex: /^staff$/i },
+                $or: [
+                    { adminId: adminId },
+                    { admin_id: adminId },
+                    { admin: adminId },
+                    { created_by: adminId },
+                    ...(isObjectId ? [
+                        { adminId: new mongoose.Types.ObjectId(adminId) },
+                        { admin_id: new mongoose.Types.ObjectId(adminId) },
+                        { admin: new mongoose.Types.ObjectId(adminId) }
+                    ] : []),
+                    { assignedDevice: { $in: myDeviceIds } }
+                ]
+            }).select("name empId userId email mobile designation").lean();
+        }
+
+        if (!adminStaff || adminStaff.length === 0) {
+            adminStaff = await User.find({ role: { $regex: /^staff$/i } }).select("name empId userId email mobile designation").lean();
+        }
+
+        const activeAssignments = await Assignment.find({
+            device: { $in: myDeviceIds },
+            status: "ACTIVE"
+        })
             .populate("staff", "name empId userId email mobile designation")
             .populate("device", "deviceId device_uid locationName location floor status")
             .sort({ assignedAt: -1 });
 
         const staffMap = new Map();
 
-        // Get all staff users
-        let allStaff = await User.find({ role: { $regex: /^staff$/i } }).select("name empId userId email mobile designation").lean();
-        if (!allStaff || allStaff.length === 0) {
-            allStaff = await User.find({ role: { $ne: "admin" } }).select("name empId userId email mobile designation").lean();
-        }
-
-        for (const s of allStaff) {
+        for (const s of adminStaff) {
+            if (!s || !s._id) continue;
             staffMap.set(s._id.toString(), {
                 staff: s,
                 assignedDevices: [],
@@ -133,24 +175,17 @@ const getAllAssignments = async (req, res) => {
             if (!asgn.staff || !asgn.device) continue;
             const staffIdStr = asgn.staff._id.toString();
             
-            if (!staffMap.has(staffIdStr)) {
-                staffMap.set(staffIdStr, {
-                    staff: asgn.staff,
-                    assignedDevices: [],
-                    deviceCount: 0,
-                    lastAssignedAt: asgn.assignedAt
+            if (staffMap.has(staffIdStr)) {
+                const item = staffMap.get(staffIdStr);
+                item.assignedDevices.push({
+                    assignmentId: asgn._id,
+                    device: asgn.device,
+                    assignedAt: asgn.assignedAt
                 });
-            }
-
-            const item = staffMap.get(staffIdStr);
-            item.assignedDevices.push({
-                assignmentId: asgn._id,
-                device: asgn.device,
-                assignedAt: asgn.assignedAt
-            });
-            item.deviceCount = item.assignedDevices.length;
-            if (!item.lastAssignedAt || asgn.assignedAt > item.lastAssignedAt) {
-                item.lastAssignedAt = asgn.assignedAt;
+                item.deviceCount = item.assignedDevices.length;
+                if (!item.lastAssignedAt || asgn.assignedAt > item.lastAssignedAt) {
+                    item.lastAssignedAt = asgn.assignedAt;
+                }
             }
         }
 
