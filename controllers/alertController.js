@@ -244,11 +244,51 @@ const getAlerts = async (req, res) => {
                 alertItem.deviceLocation = alertItem.device_uid || 'Location';
             }
 
-            // Populate telemetry fields cleanly
-            alertItem.counter = alertItem.Counter ?? alertItem.CounterValue ?? alertItem.counterValue ?? alertItem.counterThreshold ?? 0;
-            alertItem.odor = alertItem.OdorSensVal ?? alertItem.OdorLevel ?? alertItem.odorValue ?? alertItem.odorThreshold ?? 0;
-            alertItem.feedback = alertItem.feedback ?? alertItem.rating ?? alertItem.feedbackValue ?? 0;
-            alertItem.description = alertItem.description || alertItem.adminRemarks || alertItem.alertType || 'Alert triggered';
+            // Populate comprehensive telemetry fields and aliases
+            const counterVal = alertItem.Counter ?? alertItem.CounterValue ?? alertItem.counterValue ?? alertItem.counterThreshold ?? alertItem.counter ?? 0;
+            const odorVal = alertItem.OdorSensVal ?? alertItem.OdorLevel ?? alertItem.odorValue ?? alertItem.odorThreshold ?? alertItem.odor ?? 0;
+            const feedbackVal = alertItem.feedback ?? alertItem.rating ?? alertItem.feedbackValue ?? 0;
+            const descStr = alertItem.description || alertItem.adminRemarks || alertItem.alertType || 'Alert triggered';
+
+            alertItem.id = alertItem._id;
+            alertItem.alertId = alertItem._id;
+            alertItem.counter = counterVal;
+            alertItem.Counter = counterVal;
+            alertItem.CounterValue = counterVal;
+            alertItem.counterValue = counterVal;
+            alertItem.odor = odorVal;
+            alertItem.OdorSensVal = odorVal;
+            alertItem.OdorLevel = odorVal;
+            alertItem.odorValue = odorVal;
+            alertItem.feedback = feedbackVal;
+            alertItem.rating = feedbackVal;
+            alertItem.feedbackValue = feedbackVal;
+            alertItem.description = descStr;
+            alertItem.message = descStr;
+            alertItem.remarks = alertItem.adminRemarks || descStr;
+            alertItem.location = alertItem.deviceLocation;
+            alertItem.locationName = devInfo ? (devInfo.locationName || devInfo.location || '') : alertItem.deviceLocation;
+            alertItem.floor = devInfo ? (devInfo.floor || '') : '';
+            alertItem.alertCategory = alertItem.alertCategory || (alertItem.toiletStatus ? alertItem.toiletStatus : 'Need Attention');
+            alertItem.alertType = alertItem.alertType || alertItem.alertCategory || 'NEEDS_ATTENTION';
+            alertItem.category = alertItem.alertCategory;
+            alertItem.type = alertItem.alertType;
+            alertItem.title = alertItem.alertType || alertItem.alertCategory || 'Alert';
+            alertItem.timestamp = alertItem.createdAt;
+
+            if (alertItem.staffId) {
+                const staffObj = {
+                    _id: alertItem.staffId,
+                    name: alertItem.assignedStaffName || '',
+                    empId: alertItem.assignedStaffEmpId || '',
+                    userId: alertItem.assignedStaffEmpId || ''
+                };
+                alertItem.staff = staffObj;
+                alertItem.assignedStaff = staffObj;
+            } else {
+                alertItem.staff = null;
+                alertItem.assignedStaff = null;
+            }
 
             mergedAlerts.push(alertItem);
         }
@@ -285,24 +325,48 @@ const getAlerts = async (req, res) => {
             const deviceStaff = devInfo ? devInfo.assignedStaff : (task.device ? task.device.assignedStaff : null);
             const taskStaff = task.staff;
             const effectiveStaff = deviceStaff || taskStaff;
+            const staffIdStr = effectiveStaff ? (effectiveStaff._id ? effectiveStaff._id.toString() : effectiveStaff.toString()) : null;
+            const staffNameStr = effectiveStaff ? (effectiveStaff.name || '') : null;
+            const staffEmpStr = effectiveStaff ? (effectiveStaff.empId || effectiveStaff.userId || '') : null;
+
+            const devLocStr = devInfo ? `${devInfo.location || devInfo.locationName || ''}${devInfo.floor ? ' - Floor ' + devInfo.floor : ''}` : (task.device ? task.device.location : (task.device_uid || 'Location'));
+            const descStr = task.notes || task.title || 'Task Assigned';
 
             const syntheticAlert = {
                 _id: task._id,
+                id: task._id,
+                alertId: task._id,
                 taskId: task._id,
                 device_uid: task.device_uid || task.deviceId || (task.device ? task.device.device_uid : '') || (devInfo ? devInfo.device_uid : ''),
                 deviceId: devInfo ? devInfo.deviceId : (task.deviceId || task.device_uid || (task.device ? task.device.deviceId : '') || ''),
-                deviceLocation: devInfo ? `${devInfo.location || devInfo.locationName || ''}${devInfo.floor ? ' - Floor ' + devInfo.floor : ''}` : (task.device ? task.device.location : (task.device_uid || 'Location')),
+                deviceLocation: devLocStr,
+                location: devLocStr,
+                locationName: devInfo ? (devInfo.locationName || devInfo.location || '') : devLocStr,
+                floor: devInfo ? (devInfo.floor || '') : '',
                 alertType: task.title || 'TASK_ASSIGNED',
                 alertCategory: 'Need Attention',
-                description: task.notes || task.title || 'Task Assigned',
+                category: 'Need Attention',
+                type: task.title || 'TASK_ASSIGNED',
+                title: task.title || 'TASK_ASSIGNED',
+                description: descStr,
+                message: descStr,
+                remarks: descStr,
+                adminRemarks: task.adminRemarks || '',
                 feedback: 3,
+                rating: 3,
+                feedbackValue: 3,
                 counter: 0,
+                Counter: 0,
+                CounterValue: 0,
+                counterValue: 0,
                 odor: 0,
+                OdorSensVal: 0,
+                OdorLevel: 0,
+                odorValue: 0,
                 status: isResolved ? 'VERIFIED' : (isRejected ? 'REJECTED' : (effectiveStaff ? 'ASSIGNED' : 'OPEN')),
                 assignmentStatus: effectiveStaff ? 'ASSIGNED' : 'NOT_ASSIGNED',
                 isAssigned: Boolean(effectiveStaff),
                 taskStatus: task.status,
-                adminRemarks: task.adminRemarks || '',
                 taskProgressPercent: isResolved ? 100 : (task.progressPercent || 0),
                 taskCleaningPhotos: photos.filter(Boolean),
                 assignedAt: task.assignedAt || task.createdAt,
@@ -315,9 +379,12 @@ const getAlerts = async (req, res) => {
                 verifiedAt: task.verifiedAt,
                 resolvedAt: task.resolvedAt || task.verifiedAt || task.completedAt,
                 createdAt: task.createdAt || new Date(),
-                staffId: effectiveStaff ? (effectiveStaff._id ? effectiveStaff._id.toString() : effectiveStaff.toString()) : null,
-                assignedStaffName: effectiveStaff ? (effectiveStaff.name || '') : null,
-                assignedStaffEmpId: effectiveStaff ? (effectiveStaff.empId || effectiveStaff.userId || '') : null
+                timestamp: task.createdAt || new Date(),
+                staffId: staffIdStr,
+                assignedStaffName: staffNameStr,
+                assignedStaffEmpId: staffEmpStr,
+                staff: effectiveStaff ? { _id: staffIdStr, name: staffNameStr, empId: staffEmpStr, userId: staffEmpStr } : null,
+                assignedStaff: effectiveStaff ? { _id: staffIdStr, name: staffNameStr, empId: staffEmpStr, userId: staffEmpStr } : null
             };
 
             if (syntheticAlert.status === "RESOLVED") {
@@ -362,14 +429,18 @@ const getAlerts = async (req, res) => {
         }
 
         // Apply Tab / Status Query Filtering for Admin (e.g. status=not_assigned vs status=assigned)
-        const statusParam = (req.query.status || req.query.tab || req.query.assignmentStatus || '').toLowerCase();
-        if (statusParam) {
+        const rawStatus = (req.query.status || req.query.tab || req.query.assignmentStatus || '').toLowerCase();
+        const statusParam = rawStatus.replace(/[\s-]/g, '_');
+
+        if (statusParam && statusParam !== 'all') {
             if (statusParam === 'not_assigned' || statusParam === 'unassigned' || statusParam === 'open') {
-                finalAlerts = finalAlerts.filter(a => a.assignmentStatus === "NOT_ASSIGNED" || a.status === "OPEN");
+                finalAlerts = finalAlerts.filter(a => a.assignmentStatus === "NOT_ASSIGNED" || a.status === "OPEN" || a.status === "NOT_ASSIGNED");
             } else if (statusParam === 'assigned') {
                 finalAlerts = finalAlerts.filter(a => a.assignmentStatus === "ASSIGNED" || a.status === "ASSIGNED" || a.status === "IN_PROGRESS" || a.status === "SUBMITTED");
             } else if (statusParam === 'resolved' || statusParam === 'verified' || statusParam === 'completed') {
                 finalAlerts = finalAlerts.filter(a => a.status === "VERIFIED" || a.status === "RESOLVED" || a.status === "COMPLETED");
+            } else if (statusParam === 'active' || statusParam === 'pending') {
+                finalAlerts = finalAlerts.filter(a => a.status !== "VERIFIED" && a.status !== "RESOLVED" && a.status !== "COMPLETED");
             }
         }
 
@@ -379,7 +450,8 @@ const getAlerts = async (req, res) => {
         res.status(200).json({
             success: true,
             count: finalAlerts.length,
-            alerts: finalAlerts
+            alerts: finalAlerts,
+            data: finalAlerts
         });
 
     } catch (error) {
