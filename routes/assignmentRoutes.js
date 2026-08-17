@@ -9,10 +9,19 @@ const {
 } = require("../controllers/assignmentController");
 const auth = require("../middleware/authMiddleware");
 
-router.post(["/", "/assign", "/create"], auth, assignDevicesToStaff);
-router.get(["/", "/all"], auth, getAllAssignments);
+router.post("/", auth, assignDevicesToStaff);
+router.post("/assign", auth, assignDevicesToStaff);
+router.post("/create", auth, assignDevicesToStaff);
+
+router.get("/", auth, getAllAssignments);
+router.get("/all", auth, getAllAssignments);
+
 router.get("/staff/:staffId", auth, getStaffAssignments);
-router.post(["/unassign", "/remove"], auth, unassignDevice);
-router.post(["/reassign", "/update"], auth, reassignDevice);
+
+router.post("/unassign", auth, unassignDevice);
+router.post("/remove", auth, unassignDevice);
+
+router.post("/reassign", auth, reassignDevice);
+router.post("/update", auth, reassignDevice);
 
 module.exports = router;

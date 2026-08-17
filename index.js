@@ -138,6 +138,7 @@ app.use(
 app.use("/api/otp", otpRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/assignments", assignmentRoutes);
+app.use("/assignments", assignmentRoutes);
 
 app.get(["/", "/health", "/api/health"], (req, res) => {
   const mongoose = require("mongoose");
