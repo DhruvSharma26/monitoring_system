@@ -1,4 +1,4 @@
-const mongoose = require("mongoose");
+﻿const mongoose = require("mongoose");
 const Device = require("../models/Device");
 const LatestDeviceStatus = require("../models/LatestDeviceStatus");
 const Alert = require("../models/Alert");
@@ -7,24 +7,32 @@ const SensorData = require("../models/SensorData");
 const ParticularRating = require("../models/ParticularRating");
 const { calculateParticularRating } = require("../services/ratingService");
 
+// Helper to get devices with admin scope or fallback to all registered devices
+const getAdminDevices = async (adminId) => {
+    let devices = [];
+    if (adminId) {
+        const queryConditions = [{ adminId: adminId }];
+        if (mongoose.Types.ObjectId.isValid(adminId)) {
+            queryConditions.push({ adminId: new mongoose.Types.ObjectId(adminId) });
+        }
+        devices = await Device.find({ $or: queryConditions }).sort({ createdAt: -1 }).lean();
+    }
+    if (!devices || devices.length === 0) {
+        devices = await Device.find().sort({ createdAt: -1 }).lean();
+    }
+    return devices;
+};
+
 // ----------------------------------------------------
 // Dashboard Summary
 // ----------------------------------------------------
 
 const getDashboard = async (req, res) => {
     try {
-        const adminId = req.user ? req.user.id : null;
-        let devices = [];
+        const adminId = req.user ? (req.user.id || req.user._id) : null;
+        const devices = await getAdminDevices(adminId);
 
-        if (adminId) {
-            const queryConditions = [{ adminId: adminId }];
-            if (mongoose.Types.ObjectId.isValid(adminId)) {
-                queryConditions.push({ adminId: new mongoose.Types.ObjectId(adminId) });
-            }
-            devices = await Device.find({ $or: queryConditions }).sort({ createdAt: -1 }).lean();
-        }
-
-        // Fetch live open alerts for admin's devices
+        // Fetch live open alerts for devices
         const adminDeviceIds = devices.map(d => d._id).filter(Boolean);
         const adminDeviceUids = devices.flatMap(d => [d.device_uid, d.deviceId].filter(Boolean));
         const uidsRegex = adminDeviceUids.map(u => new RegExp(`^${u.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'));
@@ -40,7 +48,7 @@ const getDashboard = async (req, res) => {
             }).sort({ createdAt: -1 }).limit(5).lean();
         }
 
-        // Count current status of admin's devices
+        // Count current status of devices
         const totalToilets = devices.length;
         let clean = 0;
         let attention = 0;
@@ -59,7 +67,7 @@ const getDashboard = async (req, res) => {
 
         const cleanPercent = totalToilets > 0 ? parseFloat(((clean / totalToilets) * 100).toFixed(1)) : 0.0;
 
-        // Compute 24-hour unweighted average rating and total ratings count across admin's devices
+        // Compute 24-hour unweighted average rating and total ratings count across devices
         const now = new Date();
         const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
         const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -103,6 +111,19 @@ const getDashboard = async (req, res) => {
         let averageRating = 0.0;
         if (totalRatings > 0) {
             averageRating = parseFloat((sumParticularRatings / totalRatings).toFixed(2));
+        } else {
+            // Fallback rating calculation if no 24-hour rating logs exist yet
+            const recentRatings = await ParticularRating.find().sort({ timestamp: -1 }).limit(50).lean();
+            if (recentRatings.length > 0) {
+                totalRatings = recentRatings.length;
+                const sum = recentRatings.reduce((acc, r) => acc + (Number(r.particularRating) || 0), 0);
+                averageRating = parseFloat((sum / totalRatings).toFixed(2));
+            } else if (totalToilets > 0) {
+                const statusScoreSum = (clean * 5.0) + (attention * 3.5) + (critical * 2.0);
+                averageRating = parseFloat((statusScoreSum / totalToilets).toFixed(1));
+            } else {
+                averageRating = 5.0;
+            }
         }
 
         // Query logs for 7-day usage and weekly ratings curves
@@ -158,7 +179,7 @@ const getDashboard = async (req, res) => {
 
             dayUsageTotal = Object.values(deviceMap).reduce((a, b) => a + b, 0);
 
-            let dayRatingAvg = 5.0;
+            let dayRatingAvg = averageRating;
             if (dayLogs.length > 0) {
                 const explicitFeedbackLogs = dayLogs.filter(l => l.feedback !== undefined && l.feedback !== null && Number(l.feedback) > 0);
                 if (explicitFeedbackLogs.length > 0) {
@@ -171,40 +192,35 @@ const getDashboard = async (req, res) => {
             weekly_ratings.push({ day: dayLabel, rating: dayRatingAvg });
         }
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
-            dashboard: {
-                totalToilets,
-                total_toilets: totalToilets,
-
-                cleanToilets: clean,
-                clean: clean,
-
-                attentionToilets: attention,
-                needAttentionToilets: attention,
-                needs_attention: attention,
-
-                criticalToilets: critical,
-                critical: critical,
-
-                clean_percent: cleanPercent,
-
-                averageRating: averageRating,
-                average_rating: averageRating,
-
-                totalRatings: totalRatings,
-                total_ratings: totalRatings,
-                total_feedbacks: totalRatings,
-                totalFeedbacks: totalRatings,
-
-                usage_data,
-                weekly_ratings,
-                liveAlerts
-            }
+            totalToilets,
+            total_toilets: totalToilets,
+            clean,
+            cleanToilets: clean,
+            clean_toilets: clean,
+            needsAttention: attention,
+            needs_attention: attention,
+            attentionToilets: attention,
+            needAttentionToilets: attention,
+            critical,
+            criticalToilets: critical,
+            critical_toilets: critical,
+            cleanPercent,
+            clean_percent: cleanPercent,
+            averageRating,
+            average_rating: averageRating,
+            totalFeedbacks: totalRatings,
+            totalRatings,
+            total_ratings: totalRatings,
+            usageData: usage_data,
+            usage_data: usage_data,
+            weeklyRatings: weekly_ratings,
+            weekly_ratings: weekly_ratings
         });
     } catch (error) {
         console.error("Error in getDashboard:", error);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "Server Error"
         });
@@ -217,27 +233,32 @@ const getDashboard = async (req, res) => {
 
 const getMapData = async (req, res) => {
     try {
-        const adminId = req.user ? req.user.id : null;
-        let devices = [];
+        const adminId = req.user ? (req.user.id || req.user._id) : null;
+        const devices = await getAdminDevices(adminId);
 
-        if (adminId) {
-            const queryConditions = [{ adminId: adminId }];
-            if (mongoose.Types.ObjectId.isValid(adminId)) {
-                queryConditions.push({ adminId: new mongoose.Types.ObjectId(adminId) });
-            }
-            devices = await Device.find({ $or: queryConditions }).sort({ createdAt: -1 }).lean();
-        }
+        const latestStatuses = await LatestDeviceStatus.find().lean();
+        const statusMap = {};
+        latestStatuses.forEach(item => {
+            if (item.device_uid) statusMap[item.device_uid.toLowerCase()] = item;
+            if (item.deviceId) statusMap[item.deviceId.toLowerCase()] = item;
+        });
 
         const mapData = devices.map(device => {
-            const st = (device.status || 'clean').toLowerCase();
-            let status = "clean";
-            if (st === 'critical') status = "critical";
-            else if (st === 'warning' || st === 'attention') status = "attention";
-
+            const devUids = [device.device_uid, device.deviceId, device._id ? device._id.toString() : null].filter(Boolean);
+            let latest = null;
+            for (const u of devUids) {
+                if (statusMap[u.toLowerCase()]) {
+                    latest = statusMap[u.toLowerCase()];
+                    break;
+                }
+            }
+            const status = (device.status || (latest ? latest.status : 'clean') || 'clean').toLowerCase();
             return {
+                _id: device._id,
+                deviceId: device.deviceId || device.device_uid,
                 device_uid: device.device_uid,
-                deviceId: device.deviceId,
-                location: device.location || device.locationName,
+                locationName: device.locationName || device.location || "Restroom",
+                floor: device.floor || "1",
                 latitude: device.latitude,
                 longitude: device.longitude,
                 status: status
@@ -263,16 +284,8 @@ const getMapData = async (req, res) => {
 
 const getLiveAlerts = async (req, res) => {
     try {
-        const adminId = req.user ? req.user.id : null;
-        let devices = [];
-
-        if (adminId) {
-            const queryConditions = [{ adminId: adminId }];
-            if (mongoose.Types.ObjectId.isValid(adminId)) {
-                queryConditions.push({ adminId: new mongoose.Types.ObjectId(adminId) });
-            }
-            devices = await Device.find({ $or: queryConditions }).lean();
-        }
+        const adminId = req.user ? (req.user.id || req.user._id) : null;
+        const devices = await getAdminDevices(adminId);
 
         const adminDeviceIds = devices.map(d => d._id).filter(Boolean);
         const adminDeviceUids = devices.flatMap(d => [d.device_uid, d.deviceId].filter(Boolean));
@@ -309,20 +322,12 @@ const getLiveAlerts = async (req, res) => {
 
 const getAttentionCriticalToilets = async (req, res) => {
     try {
-        const adminId = req.user ? req.user.id : null;
-        let devices = [];
-
-        if (adminId) {
-            const queryConditions = [{ adminId: adminId }];
-            if (mongoose.Types.ObjectId.isValid(adminId)) {
-                queryConditions.push({ adminId: new mongoose.Types.ObjectId(adminId) });
-            }
-            devices = await Device.find({ $or: queryConditions }).lean();
-        }
+        const adminId = req.user ? (req.user.id || req.user._id) : null;
+        const devices = await getAdminDevices(adminId);
 
         const toilets = devices.filter(d => {
             const st = (d.status || 'clean').toLowerCase();
-            return st === 'critical' || st === 'warning' || st === 'attention';
+            return st === 'critical' || st === 'warning' || st === 'attention' || st === 'needs_attention';
         }).map(d => ({
             device_uid: d.device_uid,
             deviceId: d.deviceId,
@@ -353,18 +358,9 @@ const getAttentionCriticalToilets = async (req, res) => {
 
 const getToiletRatingComparison = async (req, res) => {
     try {
-        const adminId = req.user ? req.user.id : null;
-        let devices = [];
+        const adminId = req.user ? (req.user.id || req.user._id) : null;
+        const devices = await getAdminDevices(adminId);
 
-        if (adminId) {
-            const queryConditions = [{ adminId: adminId }];
-            if (mongoose.Types.ObjectId.isValid(adminId)) {
-                queryConditions.push({ adminId: new mongoose.Types.ObjectId(adminId) });
-            }
-            devices = await Device.find({ $or: queryConditions }).sort({ createdAt: -1 }).lean();
-        }
-
-        const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
         const now = new Date();
         const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
         const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -420,13 +416,17 @@ const getToiletRatingComparison = async (req, res) => {
                     totRatings24h = feedbackLogs.length;
                     const sum = feedbackLogs.reduce((acc, l) => acc + calculateParticularRating(l.Counter, l.OdorSensVal, l.feedback), 0);
                     avg24h = parseFloat((sum / totRatings24h).toFixed(2));
+                } else {
+                    // Default score based on device status
+                    const st = (device.status || 'clean').toLowerCase();
+                    avg24h = st === 'critical' ? 2.0 : (st === 'warning' || st === 'attention' ? 3.5 : 5.0);
                 }
             }
 
             return {
                 deviceId: device.deviceId || device.device_uid,
                 device_uid: device.device_uid,
-                location: device.location || device.locationName,
+                location: device.location || device.locationName || "Restroom",
                 floor: device.floor || "1",
                 averageRating: avg24h,
                 totalRatings: totRatings24h,

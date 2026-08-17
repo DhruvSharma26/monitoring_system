@@ -7,7 +7,7 @@ const {
     unassignDevice,
     reassignDevice
 } = require("../controllers/assignmentController");
-const auth = require("../middleware/auth");
+const auth = require("../middleware/authMiddleware");
 
 router.post("/", auth, assignDevicesToStaff);
 router.get("/", auth, getAllAssignments);
