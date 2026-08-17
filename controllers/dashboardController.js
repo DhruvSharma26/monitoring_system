@@ -1,4 +1,4 @@
-﻿const mongoose = require("mongoose");
+const mongoose = require("mongoose");
 const Device = require("../models/Device");
 const LatestDeviceStatus = require("../models/LatestDeviceStatus");
 const Alert = require("../models/Alert");

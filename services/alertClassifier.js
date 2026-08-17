@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Single Source of Truth Classification Engine
  * Evaluates Counter, Odor, and Feedback against configured Admin Settings.
  */

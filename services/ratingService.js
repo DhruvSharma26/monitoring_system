@@ -1,4 +1,4 @@
-﻿const mongoose = require("mongoose");
+const mongoose = require("mongoose");
 const ParticularRating = require("../models/ParticularRating");
 const DailyRating = require("../models/DailyRating");
 const SensorData = require("../models/SensorData");

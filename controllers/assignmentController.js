@@ -1,4 +1,4 @@
-﻿const mongoose = require("mongoose");
+const mongoose = require("mongoose");
 const Assignment = require("../models/Assignment");
 const Device = require("../models/Device");
 const User = require("../models/User");
