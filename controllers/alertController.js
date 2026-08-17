@@ -26,7 +26,7 @@ const getObjectCreationTime = (obj) => {
 
 const getAlerts = async (req, res) => {
     try {
-        const { type } = req.query;
+        const { type, status, tab } = req.query;
 
         let categoryConditions = [];
         if (type && type.toLowerCase() === "critical") {
@@ -45,7 +45,6 @@ const getAlerts = async (req, res) => {
                 return res.status(200).json({ success: true, count: 0, alerts: [] });
             }
 
-            // Find devices assigned to this staff member
             const assignedDevId = staffUserObj.assignedDevice;
             const devConditions = [
                 { assignedStaff: staffUserObj._id }
@@ -56,7 +55,6 @@ const getAlerts = async (req, res) => {
                 devConditions.push({ deviceId: assignedDevId });
             }
 
-            // Also include devices from tasks assigned to this staff
             const staffTasks = await Task.find({ staff: staffUserObj._id }).select("device device_uid deviceId").lean();
             staffTasks.forEach(t => {
                 if (t.device) devConditions.push({ _id: t.device });
@@ -64,7 +62,10 @@ const getAlerts = async (req, res) => {
                 if (t.deviceId) devConditions.push({ deviceId: t.deviceId });
             });
 
-            myDevices = await Device.find({ $or: devConditions }).select("_id device_uid deviceId location floor locationName").lean();
+            myDevices = await Device.find({ $or: devConditions })
+                .populate("assignedStaff", "name empId userId email")
+                .select("_id device_uid deviceId location floor locationName assignedStaff")
+                .lean();
 
             const alertConditions = [];
             const staffDeviceUids = [];
@@ -104,11 +105,17 @@ const getAlerts = async (req, res) => {
                     { adminId: req.user.id },
                     ...(isObjectId ? [{ adminId: new mongoose.Types.ObjectId(req.user.id) }] : [])
                 ]
-            }).select("_id device_uid deviceId location floor locationName").lean();
+            })
+            .populate("assignedStaff", "name empId userId email")
+            .select("_id device_uid deviceId location floor locationName assignedStaff")
+            .lean();
 
-            // If no devices specifically matched by adminId, fallback to querying all devices so admin still receives all alert cards
+            // Fallback to querying all devices if no devices specifically linked to adminId
             if (myDevices.length === 0) {
-                myDevices = await Device.find().select("_id device_uid deviceId location floor locationName").lean();
+                myDevices = await Device.find()
+                    .populate("assignedStaff", "name empId userId email")
+                    .select("_id device_uid deviceId location floor locationName assignedStaff")
+                    .lean();
             }
 
             const alertConditions = [];
@@ -152,12 +159,10 @@ const getAlerts = async (req, res) => {
         const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
         let alerts = await Alert.find(query).sort({ createdAt: -1 }).lean();
 
-        console.log(`📊 getAlerts query for ${req.user?.role} (${req.user?.id}): found ${alerts.length} alerts from DB`);
-
-        // Bulk fetch all tasks with device populated
+        // Bulk fetch all tasks with device and staff populated
         const allTasks = await Task.find()
-            .populate("staff", "name empId userId")
-            .populate("device", "device_uid deviceId location floor locationName")
+            .populate("staff", "name empId userId email")
+            .populate("device", "device_uid deviceId location floor locationName assignedStaff")
             .sort({ createdAt: -1 })
             .lean();
         
@@ -182,6 +187,7 @@ const getAlerts = async (req, res) => {
             const alertItem = { ...alerts[i] };
             const alertIdStr = alertItem._id ? alertItem._id.toString() : '';
             const devKey = (alertItem.device_uid || alertItem.deviceId || (alertItem.device ? alertItem.device.toString() : '') || '').toLowerCase();
+            const devInfo = deviceMap[devKey];
 
             // Find matching task strictly by alert ID first, or fallback to devKey only if alert status is ASSIGNED
             let task = taskByAlertIdMap.get(alertIdStr);
@@ -234,6 +240,31 @@ const getAlerts = async (req, res) => {
                 alertItem.taskCleaningPhotos = [];
             }
 
+            // DYNAMIC ASSIGNMENT RESOLUTION BASED ON CURRENT DEVICE & TASK STAFF
+            const deviceStaff = devInfo ? devInfo.assignedStaff : null;
+            const taskStaff = task ? task.staff : null;
+            const effectiveStaff = deviceStaff || taskStaff;
+
+            if (effectiveStaff) {
+                alertItem.assignmentStatus = "ASSIGNED";
+                alertItem.isAssigned = true;
+                alertItem.staffId = effectiveStaff._id ? effectiveStaff._id.toString() : effectiveStaff.toString();
+                alertItem.assignedStaffName = effectiveStaff.name || alertItem.assignedStaffName || "";
+                alertItem.assignedStaffEmpId = effectiveStaff.empId || effectiveStaff.userId || alertItem.assignedStaffEmpId || "";
+                if (alertItem.status === "OPEN") {
+                    alertItem.status = "ASSIGNED";
+                }
+            } else {
+                alertItem.assignmentStatus = "NOT_ASSIGNED";
+                alertItem.isAssigned = false;
+                alertItem.staffId = null;
+                alertItem.assignedStaffName = null;
+                alertItem.assignedStaffEmpId = null;
+                if (alertItem.status !== "VERIFIED" && alertItem.status !== "RESOLVED" && alertItem.status !== "COMPLETED") {
+                    alertItem.status = "OPEN";
+                }
+            }
+
             // Exclude verified/resolved alerts older than 30 days based strictly on resolvedAt timestamp
             if (alertItem.status === "VERIFIED" || alertItem.status === "RESOLVED") {
                 const resolvedDate = alertItem.resolvedAt || alertItem.verifiedAt || alertItem.completedAt || alertItem.updatedAt;
@@ -242,7 +273,6 @@ const getAlerts = async (req, res) => {
                 }
             }
 
-            const devInfo = deviceMap[devKey];
             if (devInfo) {
                 alertItem.deviceId = devInfo.deviceId || alertItem.device_uid;
                 alertItem.deviceLocation = `${devInfo.location || devInfo.locationName || ''}${devInfo.floor ? ' - Floor ' + devInfo.floor : ''}`;
@@ -251,10 +281,16 @@ const getAlerts = async (req, res) => {
                 alertItem.deviceLocation = alertItem.device_uid || 'Location';
             }
 
+            // Populate telemetry fields cleanly
+            alertItem.counter = alertItem.Counter ?? alertItem.CounterValue ?? alertItem.counterValue ?? alertItem.counterThreshold ?? 0;
+            alertItem.odor = alertItem.OdorSensVal ?? alertItem.OdorLevel ?? alertItem.odorValue ?? alertItem.odorThreshold ?? 0;
+            alertItem.feedback = alertItem.feedback ?? alertItem.rating ?? alertItem.feedbackValue ?? 0;
+            alertItem.description = alertItem.description || alertItem.adminRemarks || alertItem.alertType || 'Alert triggered';
+
             mergedAlerts.push(alertItem);
         }
 
-        // 2. Ensure ALL remaining tasks (not linked to an Alert record) are also included so NO task ever vanishes!
+        // 2. Process synthetic alerts from Tasks without Alert record
         for (let i = 0; i < allTasks.length; i++) {
             const task = allTasks[i];
             const taskIdStr = task._id.toString();
@@ -263,7 +299,6 @@ const getAlerts = async (req, res) => {
             const devKey = (task.device_uid || task.deviceId || (task.device ? (task.device.device_uid || task.device.deviceId) : '') || '').toLowerCase();
             const devInfo = deviceMap[devKey];
 
-            // For staff users, only include synthetic alerts for tasks assigned to them or matching their devices
             if (req.user && req.user.role === 'staff') {
                 const taskStaffId = task.staff ? (task.staff._id ? task.staff._id.toString() : task.staff.toString()) : '';
                 const isMyTask = taskStaffId === req.user.id.toString();
@@ -284,6 +319,10 @@ const getAlerts = async (req, res) => {
             const isRejected = task.status === "REJECTED";
             const synReassignStep = Array.isArray(task.timeline) ? task.timeline.find(step => step.status === "REASSIGNED") : null;
 
+            const deviceStaff = devInfo ? devInfo.assignedStaff : (task.device ? task.device.assignedStaff : null);
+            const taskStaff = task.staff;
+            const effectiveStaff = deviceStaff || taskStaff;
+
             const syntheticAlert = {
                 _id: task._id,
                 taskId: task._id,
@@ -291,8 +330,14 @@ const getAlerts = async (req, res) => {
                 deviceId: devInfo ? devInfo.deviceId : (task.deviceId || task.device_uid || (task.device ? task.device.deviceId : '') || ''),
                 deviceLocation: devInfo ? `${devInfo.location || devInfo.locationName || ''}${devInfo.floor ? ' - Floor ' + devInfo.floor : ''}` : (task.device ? task.device.location : (task.device_uid || 'Location')),
                 alertType: task.title || 'TASK_ASSIGNED',
+                alertCategory: 'Need Attention',
+                description: task.notes || task.title || 'Task Assigned',
                 feedback: 3,
-                status: isResolved ? 'VERIFIED' : (isRejected ? 'REJECTED' : 'ASSIGNED'),
+                counter: 0,
+                odor: 0,
+                status: isResolved ? 'VERIFIED' : (isRejected ? 'REJECTED' : (effectiveStaff ? 'ASSIGNED' : 'OPEN')),
+                assignmentStatus: effectiveStaff ? 'ASSIGNED' : 'NOT_ASSIGNED',
+                isAssigned: Boolean(effectiveStaff),
                 taskStatus: task.status,
                 adminRemarks: task.adminRemarks || '',
                 taskProgressPercent: isResolved ? 100 : (task.progressPercent || 0),
@@ -307,12 +352,11 @@ const getAlerts = async (req, res) => {
                 verifiedAt: task.verifiedAt,
                 resolvedAt: task.resolvedAt || task.verifiedAt || task.completedAt,
                 createdAt: task.createdAt || new Date(),
-                staffId: task.staff ? (task.staff._id ? task.staff._id.toString() : task.staff.toString()) : '',
-                assignedStaffName: task.staff ? task.staff.name : '',
-                assignedStaffEmpId: task.staff ? (task.staff.empId || task.staff.userId || '') : ''
+                staffId: effectiveStaff ? (effectiveStaff._id ? effectiveStaff._id.toString() : effectiveStaff.toString()) : null,
+                assignedStaffName: effectiveStaff ? (effectiveStaff.name || '') : null,
+                assignedStaffEmpId: effectiveStaff ? (effectiveStaff.empId || effectiveStaff.userId || '') : null
             };
 
-            // Exclude resolved tasks older than 30 days based strictly on resolvedAt timestamp
             if (syntheticAlert.status === "RESOLVED") {
                 const resolvedDate = syntheticAlert.resolvedAt || syntheticAlert.verifiedAt || syntheticAlert.completedAt;
                 if (resolvedDate && new Date(resolvedDate) < thirtyDaysAgo) {
@@ -324,6 +368,8 @@ const getAlerts = async (req, res) => {
         }
 
         let finalAlerts = mergedAlerts;
+
+        // Staff Role Filtering
         if (req.user && req.user.role === 'staff' && staffUserObj) {
             const staffDeviceUidsSet = new Set(
                 myDevices.flatMap(d => [
@@ -338,24 +384,30 @@ const getAlerts = async (req, res) => {
             finalAlerts = mergedAlerts.filter(alertItem => {
                 const isResolved = alertItem.status === "RESOLVED" || alertItem.taskStatus === "VERIFIED" || alertItem.taskStatus === "COMPLETED" || alertItem.taskStatus === "RESOLVED";
 
-                if (isResolved) {
-                    return false;
-                }
+                if (isResolved) return false;
 
                 const devKey1 = (alertItem.device_uid || "").toLowerCase();
                 const devKey2 = (alertItem.deviceId || "").toLowerCase();
                 const isDeviceMatched = (devKey1 && staffDeviceUidsSet.has(devKey1)) || (devKey2 && staffDeviceUidsSet.has(devKey2));
-                if (!isDeviceMatched) {
-                    return false;
-                }
+                if (!isDeviceMatched) return false;
 
                 const alertTime = getObjectCreationTime(alertItem);
-                if (staffCreationTime > 0 && alertTime > 0 && alertTime < staffCreationTime) {
-                    return false;
-                }
+                if (staffCreationTime > 0 && alertTime > 0 && alertTime < staffCreationTime) return false;
 
                 return true;
             });
+        }
+
+        // Apply Tab / Status Query Filtering for Admin (e.g. status=not_assigned vs status=assigned)
+        const statusParam = (req.query.status || req.query.tab || req.query.assignmentStatus || '').toLowerCase();
+        if (statusParam) {
+            if (statusParam === 'not_assigned' || statusParam === 'unassigned' || statusParam === 'open') {
+                finalAlerts = finalAlerts.filter(a => a.assignmentStatus === "NOT_ASSIGNED" || a.status === "OPEN");
+            } else if (statusParam === 'assigned') {
+                finalAlerts = finalAlerts.filter(a => a.assignmentStatus === "ASSIGNED" || a.status === "ASSIGNED" || a.status === "IN_PROGRESS" || a.status === "SUBMITTED");
+            } else if (statusParam === 'resolved' || statusParam === 'verified' || statusParam === 'completed') {
+                finalAlerts = finalAlerts.filter(a => a.status === "VERIFIED" || a.status === "RESOLVED" || a.status === "COMPLETED");
+            }
         }
 
         // Sort all merged alerts/tasks by createdAt descending
