@@ -231,8 +231,8 @@ function connectMQTT() {
 
         const du = payload.device_uid ?? payload.deviceId ?? payload.device_id;
         const f = payload.feedback ?? payload.FeedBack ?? payload.Feedback ?? payload.feedBack;
-        const c = payload.Counter ?? payload.counter ?? payload.CounterValue;
-        const o = payload.OdorSensVal ?? payload.odorSensVal ?? payload.odor ?? payload.Odor ?? payload.OdorLevel;
+        const c = payload.CounterValue ?? payload.Counter ?? payload.counter ?? payload.counterValue;
+        const o = payload.OdorLevel ?? payload.OdorSensVal ?? payload.odorSensVal ?? payload.odor ?? payload.Odor;
 
         if (!du) {
           console.log("⚠️ Missing device identifier in payload:", raw);
@@ -278,7 +278,9 @@ function connectMQTT() {
           timestamp: recordTimestamp,
           date: dateStr,
           feedback: f !== undefined ? Number(f) : undefined,
+          CounterValue: c !== undefined ? Number(c) : undefined,
           Counter: c !== undefined ? Number(c) : undefined,
+          OdorLevel: o !== undefined ? Number(o) : undefined,
           OdorSensVal: o !== undefined ? Number(o) : undefined
         };
 

@@ -16,7 +16,11 @@ new mongoose.Schema(
 
     Counter: Number,
 
+    CounterValue: Number,
+
     OdorSensVal: Number,
+
+    OdorLevel: Number,
 
     timestamp: Date
 },

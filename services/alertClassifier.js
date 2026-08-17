@@ -49,8 +49,8 @@ const classifyTelemetry = (feedbackVal, counterVal, odorVal, settings) => {
     }
 
     const alertCategory = overallSeverity === "CRITICAL" ? "Critical" : (overallSeverity === "NEED_ATTENTION" ? "Need Attention" : null);
-    const alertType = overallSeverity === "CRITICAL" ? "CRITICAL" : (overallSeverity === "NEED_ATTENTION" ? "NEEDS_ATTENTION" : null);
-    const toiletStatus = overallSeverity === "CRITICAL" ? "CRITICAL" : (overallSeverity === "NEED_ATTENTION" ? "NEEDS_ATTENTION" : "CLEAN");
+    const alertType = alertCategory; // alertType and alertCategory are identical ("Critical" or "Need Attention")
+    const toiletStatus = overallSeverity === "CRITICAL" ? "Critical" : (overallSeverity === "NEED_ATTENTION" ? "Need Attention" : "Clean");
 
     // 5. Generate Detailed Descriptions for ALL Triggered Conditions
     const triggeredDescriptions = [];
@@ -103,8 +103,13 @@ const classifyTelemetry = (feedbackVal, counterVal, odorVal, settings) => {
         feedbackSeverity,
 
         counterValue: counter,
+        CounterValue: counter,
+        Counter: counter,
         odorValue: odor,
+        OdorLevel: odor,
+        OdorSensVal: odor,
         feedbackValue: feedback,
+        feedback: feedback,
 
         counterThreshold,
         odorThreshold,

@@ -34,7 +34,17 @@ const sensorDataSchema = new mongoose.Schema(
         default: 0
     },
 
+    CounterValue: {
+        type: Number,
+        default: 0
+    },
+
     OdorSensVal: {
+        type: Number,
+        default: 0
+    },
+
+    OdorLevel: {
         type: Number,
         default: 0
     }

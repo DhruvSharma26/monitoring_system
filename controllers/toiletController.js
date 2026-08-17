@@ -59,7 +59,7 @@ const getToiletDetails = async (req, res) => {
         const warningOdorThreshold = Math.round(odorThreshold * 0.75);
         const warningCounterThreshold = Math.round(counterThreshold * 0.75);
 
-        let status = "clean";
+        let status = "Clean";
         if (latestStatus && latestStatus.timestamp) {
             const latestDateStr = new Date(latestStatus.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
             const todayDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
@@ -72,13 +72,7 @@ const getToiletDetails = async (req, res) => {
                     userSettings
                 );
 
-                if (classification.status === "NEEDS_ATTENTION") {
-                    status = "warning";
-                } else if (classification.status === "CRITICAL") {
-                    status = "critical";
-                } else {
-                    status = "clean";
-                }
+                status = classification.toiletStatus || "Clean";
             }
         }
 
@@ -235,7 +229,9 @@ const getToiletDetails = async (req, res) => {
 
         const liveSensorObj = {
             Counter: currentCounter,
+            CounterValue: currentCounter,
             OdorSensVal: currentOdor,
+            OdorLevel: currentOdor,
             feedback: currentFeedback,
             timestamp: isLatestToday ? latestStatus.timestamp : new Date()
         };
@@ -248,7 +244,9 @@ const getToiletDetails = async (req, res) => {
             totalUsage,
             latestSensor: liveSensorObj,
             currentCounter: currentCounter,
+            currentCounterValue: currentCounter,
             currentOdor: currentOdor,
+            currentOdorLevel: currentOdor,
             lastCleanedByStaff,
             lastCleanedByStaffName,
             lastCleanedByStaffUserId,
@@ -330,13 +328,18 @@ const postToiletTelemetry = async (req, res) => {
         const dd = String(now.getDate()).padStart(2, '0');
         const dateStr = `${yyyy}-${mm}-${dd}`;
 
+        const cVal = CounterValue ?? Counter ?? counterVal ?? counter;
+        const oVal = OdorLevel ?? OdorSensVal ?? odorVal ?? odor;
+
         const sensorPayload = {
             device_uid: device.device_uid,
             deviceId: device.deviceId,
             timestamp: now,
             date: dateStr,
-            Counter: Counter !== undefined ? Number(Counter) : 0,
-            OdorSensVal: OdorSensVal !== undefined ? Number(OdorSensVal) : 0,
+            CounterValue: cVal !== undefined ? Number(cVal) : 0,
+            Counter: cVal !== undefined ? Number(cVal) : 0,
+            OdorLevel: oVal !== undefined ? Number(oVal) : 0,
+            OdorSensVal: oVal !== undefined ? Number(oVal) : 0,
             feedback: feedback !== undefined ? Number(feedback) : 1
         };
 

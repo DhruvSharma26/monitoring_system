@@ -154,7 +154,9 @@ const processOrCreateDeviceAlertInternal = async (alertData) => {
 
             existingUnassignedAlert.feedback = feedback !== undefined ? feedback : existingUnassignedAlert.feedback;
             existingUnassignedAlert.Counter = Counter !== undefined ? Counter : existingUnassignedAlert.Counter;
+            existingUnassignedAlert.CounterValue = Counter !== undefined ? Counter : existingUnassignedAlert.CounterValue;
             existingUnassignedAlert.OdorSensVal = OdorSensVal !== undefined ? OdorSensVal : existingUnassignedAlert.OdorSensVal;
+            existingUnassignedAlert.OdorLevel = OdorSensVal !== undefined ? OdorSensVal : existingUnassignedAlert.OdorLevel;
 
             if (counterThreshold !== undefined) existingUnassignedAlert.counterThreshold = counterThreshold;
             if (odorThreshold !== undefined) existingUnassignedAlert.odorThreshold = odorThreshold;
@@ -181,14 +183,16 @@ const processOrCreateDeviceAlertInternal = async (alertData) => {
                 deviceId: targetDevId,
                 device: device ? device._id : null,
                 alertCategory: normalizedCategory,
-                alertType: alertType || (normalizedCategory === "Critical" ? "CRITICAL" : "NEEDS_ATTENTION"),
+                alertType: alertType || normalizedCategory,
                 alertSubtype: alertSubtype,
                 rating: rating,
                 toiletStatus: toiletStatus,
                 description: description,
                 feedback: feedback !== undefined ? feedback : 0,
                 Counter: Counter !== undefined ? Counter : 0,
+                CounterValue: Counter !== undefined ? Counter : 0,
                 OdorSensVal: OdorSensVal !== undefined ? OdorSensVal : 0,
+                OdorLevel: OdorSensVal !== undefined ? OdorSensVal : 0,
 
                 counterThreshold,
                 odorThreshold,

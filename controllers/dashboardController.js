@@ -333,8 +333,8 @@ const getAttentionCriticalToilets = async (req, res) => {
         const devices = await getAdminDevices(adminId);
 
         const toilets = devices.filter(d => {
-            const st = (d.status || 'clean').toLowerCase();
-            return st === 'critical' || st === 'warning' || st === 'attention' || st === 'needs_attention';
+            const st = (d.status || 'clean').toLowerCase().trim();
+            return st === 'critical' || st.includes('attention') || st === 'warning';
         }).map(d => ({
             device_uid: d.device_uid,
             deviceId: d.deviceId,
@@ -342,7 +342,7 @@ const getAttentionCriticalToilets = async (req, res) => {
             floor: d.floor,
             latitude: d.latitude,
             longitude: d.longitude,
-            status: (d.status || '').toLowerCase() === 'critical' ? "CRITICAL" : "ATTENTION"
+            status: (d.status || '').toLowerCase().trim() === 'critical' ? "Critical" : "Need Attention"
         }));
 
         res.status(200).json({

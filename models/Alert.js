@@ -25,6 +25,8 @@ const alertSchema = new mongoose.Schema(
     alertType: {
         type: String,
         enum: [
+            "Need Attention",
+            "Critical",
             "NEEDS_ATTENTION",
             "CRITICAL",
             "HIGH_USAGE",
@@ -42,7 +44,7 @@ const alertSchema = new mongoose.Schema(
 
     toiletStatus: {
         type: String,
-        enum: ["CLEAN", "NEEDS_ATTENTION", "CRITICAL"]
+        enum: ["Clean", "Need Attention", "Critical", "CLEAN", "NEEDS_ATTENTION", "CRITICAL"]
     },
 
     description: {
@@ -52,7 +54,9 @@ const alertSchema = new mongoose.Schema(
 
     feedback: Number,
     Counter: Number,
+    CounterValue: Number,
     OdorSensVal: Number,
+    OdorLevel: Number,
 
     // Audit fields for historical retention
     counterThreshold: Number,

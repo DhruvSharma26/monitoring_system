@@ -91,8 +91,8 @@ const getToilets = async (req, res) => {
                 }
             }
 
-            // 2. Status Calculation (Clean, Warning, Critical) - NO "DIRTY"
-            let toiletStatus = "clean";
+            // 2. Status Calculation ("Clean", "Need Attention", "Critical")
+            let toiletStatus = "Clean";
             const latestDateStr = latestStatus.timestamp ? new Date(latestStatus.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : null;
             const todayDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
             const isToday = Boolean(latestDateStr && latestDateStr === todayDateStr);
@@ -106,22 +106,16 @@ const getToilets = async (req, res) => {
                     userSettings
                 );
 
-                if (classification.status === "NEEDS_ATTENTION") {
-                    toiletStatus = "warning";
-                } else if (classification.status === "CRITICAL") {
-                    toiletStatus = "critical";
-                } else {
-                    toiletStatus = "clean";
-                }
+                toiletStatus = classification.toiletStatus || "Clean";
             }
 
-            // REMOVE "DIRTY" FILTER - Filter by requested status (clean, warning/needs attention, critical)
-            if (status && status.toLowerCase() !== "all") {
+            // Case-insensitive status filter ("Clean", "Need Attention", "Critical")
+            if (status && status.toLowerCase().trim() !== "all") {
                 const reqSt = status.toLowerCase().trim();
-                const currentSt = toiletStatus.toLowerCase();
+                const currentSt = toiletStatus.toLowerCase().trim();
                 
-                if (reqSt === "needs attention" || reqSt === "warning" || reqSt === "attention") {
-                    if (currentSt !== "warning") continue;
+                if (reqSt === "needs attention" || reqSt === "need attention" || reqSt === "warning" || reqSt === "attention" || reqSt === "needs_attention" || reqSt === "need_attention") {
+                    if (!currentSt.includes("attention") && currentSt !== "warning") continue;
                 } else if (reqSt === "critical") {
                     if (currentSt !== "critical") continue;
                 } else if (reqSt === "clean") {
@@ -200,8 +194,10 @@ const getToilets = async (req, res) => {
 
                 // Live Sensor snapshot
                 feedback: latestStatus.feedback || 0,
-                Counter: isToday ? (Number(latestStatus.Counter) || 0) : 0,
-                OdorSensVal: isToday ? (Number(latestStatus.OdorSensVal) || 0) : 0,
+                Counter: isToday ? (Number(latestStatus.CounterValue ?? latestStatus.Counter) || 0) : 0,
+                CounterValue: isToday ? (Number(latestStatus.CounterValue ?? latestStatus.Counter) || 0) : 0,
+                OdorSensVal: isToday ? (Number(latestStatus.OdorLevel ?? latestStatus.OdorSensVal) || 0) : 0,
+                OdorLevel: isToday ? (Number(latestStatus.OdorLevel ?? latestStatus.OdorSensVal) || 0) : 0,
                 latitude: device.latitude,
                 longitude: device.longitude,
                 timestamp: latestStatus.timestamp || device.createdAt

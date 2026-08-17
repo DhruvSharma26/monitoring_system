@@ -32,16 +32,12 @@ const getAlerts = async (req, res) => {
 
         let query = {};
 
-        if (type === "critical") {
-
-            query.feedback = 4;
-
+        if (type && type.toLowerCase() === "critical") {
+            query.$or = [{ alertCategory: "Critical" }, { alertType: "CRITICAL" }];
         }
 
-        if (type === "attention") {
-
-            query.feedback = 3;
-
+        if (type && (type.toLowerCase() === "attention" || type.toLowerCase() === "needs_attention" || type.toLowerCase() === "need_attention")) {
+            query.$or = [{ alertCategory: "Need Attention" }, { alertType: "NEEDS_ATTENTION" }];
         }
 
         // Filter alerts by user role (admin devices vs staff assigned devices)
