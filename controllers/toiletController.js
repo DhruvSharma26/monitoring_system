@@ -5,6 +5,7 @@ const LatestDeviceStatus = require("../models/LatestDeviceStatus");
 const User = require("../models/User");
 const Alert = require("../models/Alert");
 const Task = require("../models/Task");
+const ratingService = require("../services/ratingService");
 
 const getToiletDetails = async (req, res) => {
     try {
@@ -52,11 +53,11 @@ const getToiletDetails = async (req, res) => {
             Settings.findOne({ adminId: req.user.id }).lean()
         ]);
 
-        const userSettings = settings || (await Settings.findOne().lean());
-        const odorThreshold = userSettings?.odorThreshold || 80;
-        const counterThreshold = userSettings?.counterThreshold || 100;
-        const warningOdorThreshold = Math.round(odorThreshold * 0.625);
-        const warningCounterThreshold = Math.round(counterThreshold * 0.7);
+        const userSettings = settings || (await Settings.findOne({ adminId: req.user.id }).lean()) || (await Settings.findOne().lean());
+        const odorThreshold = Number(userSettings?.odorThreshold) || 200;
+        const counterThreshold = Number(userSettings?.counterThreshold) || 100;
+        const warningOdorThreshold = Math.round(odorThreshold * 0.75);
+        const warningCounterThreshold = Math.round(counterThreshold * 0.75);
 
         let status = "clean";
         if (latestStatus && latestStatus.timestamp) {
@@ -165,25 +166,20 @@ const getToiletDetails = async (req, res) => {
                 }
                 dayOdor = Math.round(sumOdor / dayLogs.length);
 
-                // Rating calculation
+                // Rating calculation using ratingService
                 const explicitLogs = dayLogs.filter(l => l.feedback !== undefined && l.feedback !== null && Number(l.feedback) > 0);
                 if (explicitLogs.length > 0) {
-                    const sumRating = explicitLogs.reduce((acc, l) => acc + feedbackToRating(Number(l.feedback)), 0);
+                    const sumRating = explicitLogs.reduce((acc, l) => acc + ratingService.calculateParticularRating(l.Counter, l.OdorSensVal, l.feedback), 0);
                     dayRating = parseFloat((sumRating / explicitLogs.length).toFixed(1));
                 } else {
-                    const highOdor = dayLogs.some(l => (Number(l.OdorSensVal) || 0) >= 80);
-                    const warningOdor = dayLogs.some(l => (Number(l.OdorSensVal) || 0) >= 50);
-                    dayRating = highOdor ? 1.0 : (warningOdor ? 2.5 : 5.0);
+                    const sumRating = dayLogs.reduce((acc, l) => acc + ratingService.calculateParticularRating(l.Counter, l.OdorSensVal, l.feedback || 4), 0);
+                    dayRating = parseFloat((sumRating / dayLogs.length).toFixed(1));
                 }
             } else if (i === 0 && latestStatus) {
                 // Fallback for today if live telemetry exists
                 dayCounter = Number(latestStatus.Counter) || 0;
                 dayOdor = Number(latestStatus.OdorSensVal) || 0;
-                if (latestStatus.feedback !== undefined && latestStatus.feedback > 0) {
-                    dayRating = feedbackToRating(latestStatus.feedback);
-                } else {
-                    dayRating = dayOdor >= 80 ? 1.0 : (dayOdor >= 50 ? 2.5 : 5.0);
-                }
+                dayRating = ratingService.calculateParticularRating(latestStatus.Counter, latestStatus.OdorSensVal, latestStatus.feedback || 4);
             } else {
                 dayCounter = 0;
                 dayOdor = 0;
@@ -196,17 +192,21 @@ const getToiletDetails = async (req, res) => {
             cleaningHistory.push({ day: dayLabel, date: dateStr, value: dayCleaningCount });
         }
 
-        let averageRating = 5.0;
-        if (last7DaysSensorLogs.length > 0) {
-            const logsWithFeedback = last7DaysSensorLogs.filter(l => l.feedback !== undefined && l.feedback !== null && Number(l.feedback) > 0);
-            if (logsWithFeedback.length > 0) {
-                const sum = logsWithFeedback.reduce((acc, l) => acc + feedbackToRating(Number(l.feedback)), 0);
-                averageRating = parseFloat((sum / logsWithFeedback.length).toFixed(1));
-            } else if (latestStatus && latestStatus.feedback !== undefined && latestStatus.feedback > 0) {
-                averageRating = feedbackToRating(latestStatus.feedback);
+        // Calculate 24-hour average rating using ratingService
+        const metrics24h = await ratingService.get24HourMetrics(targetUids);
+        let averageRating = metrics24h.averageRating;
+        if (averageRating === null) {
+            if (last7DaysSensorLogs.length > 0) {
+                const logsWithFeedback = last7DaysSensorLogs.filter(l => l.feedback !== undefined && l.feedback !== null && Number(l.feedback) > 0);
+                if (logsWithFeedback.length > 0) {
+                    const sum = logsWithFeedback.reduce((acc, l) => acc + ratingService.calculateParticularRating(l.Counter, l.OdorSensVal, l.feedback), 0);
+                    averageRating = parseFloat((sum / logsWithFeedback.length).toFixed(1));
+                } else {
+                    averageRating = 5.0;
+                }
+            } else {
+                averageRating = 5.0;
             }
-        } else if (latestStatus && latestStatus.feedback !== undefined && latestStatus.feedback > 0) {
-            averageRating = feedbackToRating(latestStatus.feedback);
         }
 
         const latestDateStr = latestStatus && latestStatus.timestamp ? new Date(latestStatus.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : null;
@@ -349,26 +349,43 @@ const postToiletTelemetry = async (req, res) => {
         );
 
         const Settings = require("../models/Settings");
-        const settings = await Settings.findOne() || { counterThreshold: 100, odorThreshold: 80 };
+        const adminSettings = device.adminId ? await Settings.findOne({ adminId: device.adminId }).lean() : await Settings.findOne().lean();
+        const settings = adminSettings || { counterThreshold: 100, odorThreshold: 200 };
 
-        let alertType = null;
-        if (sensorPayload.feedback === 4) alertType = "CRITICAL_FEEDBACK";
-        else if (sensorPayload.feedback === 3) alertType = "WARNING_FEEDBACK";
-        else if (sensorPayload.OdorSensVal > settings.odorThreshold) alertType = "HIGH_ODOR";
-        else if (sensorPayload.Counter > settings.counterThreshold) alertType = "HIGH_USAGE";
+        const { classifyTelemetry } = require("../services/alertClassifier");
+        const classification = classifyTelemetry(
+            sensorPayload.feedback,
+            sensorPayload.Counter,
+            sensorPayload.OdorSensVal,
+            settings
+        );
 
-        if (alertType) {
+        if (classification.status !== "CLEAN" && classification.alertCategory) {
             const alertService = require("../services/alertService");
             const notificationService = require("../services/notificationService");
 
             const { alert: alertDoc, isOverwritten } = await alertService.processOrCreateDeviceAlert({
                 device_uid: device.device_uid,
                 deviceId: device.deviceId,
-                alertType,
+                alertCategory: classification.alertCategory,
+                alertType: classification.alertType,
+                toiletStatus: classification.status,
+                description: classification.description,
                 feedback: sensorPayload.feedback,
                 Counter: sensorPayload.Counter,
-                OdorSensVal: sensorPayload.OdorSensVal
+                OdorSensVal: sensorPayload.OdorSensVal,
+                counterThreshold: classification.counterThreshold,
+                odorThreshold: classification.odorThreshold,
+                counterValue: classification.counterValue,
+                odorValue: classification.odorValue,
+                feedbackValue: classification.feedbackValue,
+                counterSeverity: classification.counterSeverity,
+                odorSeverity: classification.odorSeverity,
+                feedbackSeverity: classification.feedbackSeverity,
+                triggeredValues: classification.triggeredValues
             });
+
+            const alertType = classification.alertType;
 
             // Dispatch targeted notifications (DB, FCM Push, Sockets) ONLY to admin who registered device & assigned staff
             await notificationService.handleMqttAlertNotification(sensorPayload, alertType, alertDoc);

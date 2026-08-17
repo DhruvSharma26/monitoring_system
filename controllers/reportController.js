@@ -8,46 +8,7 @@ const Task = require("../models/Task");
 const ParticularRating = require("../models/ParticularRating");
 const DailyRating = require("../models/DailyRating");
 const Assignment = require("../models/Assignment");
-const { calculateParticularRating } = require("../services/ratingService");
-
-// Formula Grounded Helper
-const calculateParticularRatingDetails = (counterVal, odorVal, feedbackVal) => {
-    let cVal = Number(counterVal) || 0;
-    let cRating = 5;
-    if (cVal > 75) cRating = 1;
-    else if (cVal >= 51) cRating = 2;
-    else if (cVal >= 31) cRating = 3;
-    else if (cVal >= 11) cRating = 4;
-    else cRating = 5;
-
-    let oVal = Number(odorVal) || 0;
-    let oRating = 5;
-    if (oVal > 350) oRating = 1;
-    else if (oVal >= 251) oRating = 2;
-    else if (oVal >= 151) oRating = 3;
-    else if (oVal >= 51) oRating = 4;
-    else oRating = 5;
-
-    let fVal = Number(feedbackVal) || 1;
-    let fRating = 4;
-    if (fVal === 4) fRating = 4;
-    else if (fVal === 3) fRating = 3;
-    else if (fVal === 2) fRating = 2;
-    else if (fVal === 1) fRating = 1;
-    else fRating = 4;
-
-    let particularRating = parseFloat(((cRating + oRating + fRating) / 3).toFixed(2));
-
-    return {
-        counterValue: cVal,
-        counterRating: cRating,
-        odorValue: oVal,
-        odorRating: oRating,
-        feedbackValue: fVal,
-        feedbackRating: fRating,
-        particularRating
-    };
-};
+const { calculateParticularRating, calculateParticularRatingDetails } = require("../services/ratingService");
 
 // Date Range Validation (Max 1 Month = ~31 Days)
 const parseAndValidateReportDateRange = (reqQuery) => {
@@ -266,7 +227,7 @@ const getReportStats = async (req, res) => {
                 ratingCount++;
             }
         }
-        const avgRatingVal = ratingCount > 0 ? parseFloat((sumRating / ratingCount).toFixed(1)) : 4.5;
+        const avgRatingVal = ratingCount > 0 ? parseFloat((sumRating / ratingCount).toFixed(1)) : 5.0;
 
         const completedTasksList = await Task.find({
             device: { $in: deviceIds },
@@ -405,7 +366,7 @@ const getDeviceReports = async (req, res) => {
         // Overall Summary Calculations
         let overallTotalRatings = allParticularRatings.length;
         let overallSumRating = allParticularRatings.reduce((acc, r) => acc + r.particularRating, 0);
-        let overallAverageRating = overallTotalRatings > 0 ? parseFloat((overallSumRating / overallTotalRatings).toFixed(2)) : 4.5;
+        let overallAverageRating = overallTotalRatings > 0 ? parseFloat((overallSumRating / overallTotalRatings).toFixed(2)) : 5.0;
 
         let totalAlertsCount = allAlerts.length;
         let criticalAlertsCount = allAlerts.filter(a => a.alertCategory === "Critical").length;

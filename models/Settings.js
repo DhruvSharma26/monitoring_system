@@ -15,7 +15,7 @@ const settingsSchema = new mongoose.Schema(
 
     odorThreshold: {
         type: Number,
-        default: 80
+        default: 200
     }
 },
 {

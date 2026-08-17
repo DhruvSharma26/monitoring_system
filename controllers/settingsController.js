@@ -63,15 +63,15 @@ const updateThresholds =
 const getThresholds = async (req, res) => {
     try {
         let settingsDoc = await Settings.findOne({ adminId: req.user.id });
-        const counterVal = settingsDoc?.counterThreshold || 100;
-        const odorVal = settingsDoc?.odorThreshold || 80;
+        const counterVal = Number(settingsDoc?.counterThreshold) || 100;
+        const odorVal = Number(settingsDoc?.odorThreshold) || 200;
 
         const settingsObj = {
             adminId: req.user.id,
             counterThreshold: counterVal,
             odorThreshold: odorVal,
-            counterWarningThreshold: counterVal * 0.5,
-            odorWarningThreshold: odorVal * 0.5
+            counterWarningThreshold: Math.round(counterVal * 0.75),
+            odorWarningThreshold: Math.round(odorVal * 0.75)
         };
 
         res.status(200).json({ success: true, settings: settingsObj });

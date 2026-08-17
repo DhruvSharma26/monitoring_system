@@ -151,11 +151,34 @@ const get24HourMetrics = async (devUids) => {
     }
 };
 
+// Particular rating breakdown details for reports & logs
+const calculateParticularRatingDetails = (counterVal, odorVal, feedbackVal) => {
+    const cVal = Number(counterVal) || 0;
+    const oVal = Number(odorVal) || 0;
+    const fVal = Number(feedbackVal) || 1;
+
+    const cRating = getCounterRating(cVal);
+    const oRating = getOdorRating(oVal);
+    const fRating = getFeedbackRating(fVal);
+    const particularRating = parseFloat(((cRating + oRating + fRating) / 3.0).toFixed(2));
+
+    return {
+        counterValue: cVal,
+        counterRating: cRating,
+        odorValue: oVal,
+        odorRating: oRating,
+        feedbackValue: fVal,
+        feedbackRating: fRating,
+        particularRating
+    };
+};
+
 module.exports = {
     getCounterRating,
     getOdorRating,
     getFeedbackRating,
     calculateParticularRating,
+    calculateParticularRatingDetails,
     recordParticularRating,
     get24HourMetrics
 };
