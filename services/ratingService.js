@@ -96,6 +96,15 @@ const recordParticularRating = async ({ device_uid, device, timestamp, counter, 
 const get24HourMetrics = async (devUids) => {
     try {
         const uids = Array.isArray(devUids) ? devUids.filter(Boolean) : [devUids].filter(Boolean);
+
+        if (!uids || uids.length === 0) {
+            return {
+                averageRating: null,
+                totalRatings: 0,
+                totalUsage: 0
+            };
+        }
+
         const regexUids = uids.map(u => new RegExp(`^${u.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'));
 
         const now = new Date();

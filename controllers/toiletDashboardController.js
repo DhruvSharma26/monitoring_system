@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Device = require("../models/Device");
 const LatestDeviceStatus = require("../models/LatestDeviceStatus");
 const SensorData = require("../models/SensorData");
@@ -10,17 +11,33 @@ const getToilets = async (req, res) => {
     try {
         const { status } = req.query;
 
-        let adminDevices = await Device.find({ adminId: req.user.id })
+        const adminId = req.user ? (req.user.id || req.user._id) : null;
+        if (!adminId) {
+            return res.status(200).json({
+                success: true,
+                count: 0,
+                toilets: []
+            });
+        }
+
+        const queryConditions = [{ adminId: adminId }];
+        if (mongoose.Types.ObjectId.isValid(adminId)) {
+            queryConditions.push({ adminId: new mongoose.Types.ObjectId(adminId) });
+        }
+
+        const adminDevices = await Device.find({ $or: queryConditions })
             .populate("assignedStaff", "name empId userId email")
             .sort({ createdAt: -1 })
             .lean();
 
         if (!adminDevices || adminDevices.length === 0) {
-            adminDevices = await Device.find()
-                .populate("assignedStaff", "name empId userId email")
-                .sort({ createdAt: -1 })
-                .lean();
+            return res.status(200).json({
+                success: true,
+                count: 0,
+                toilets: []
+            });
         }
+
         const devices = adminDevices;
 
         const Settings = require("../models/Settings");

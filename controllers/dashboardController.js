@@ -8,20 +8,16 @@ const SensorData = require("../models/SensorData");
 const ParticularRating = require("../models/ParticularRating");
 const { calculateParticularRating } = require("../services/ratingService");
 
-// Helper to get devices with admin scope or fallback to all registered devices
+// Helper to get devices with admin scope
 const getAdminDevices = async (adminId) => {
-    let devices = [];
     if (adminId) {
         const queryConditions = [{ adminId: adminId }];
         if (mongoose.Types.ObjectId.isValid(adminId)) {
             queryConditions.push({ adminId: new mongoose.Types.ObjectId(adminId) });
         }
-        devices = await Device.find({ $or: queryConditions }).sort({ createdAt: -1 }).lean();
+        return await Device.find({ $or: queryConditions }).sort({ createdAt: -1 }).lean();
     }
-    if (!devices || devices.length === 0) {
-        devices = await Device.find().sort({ createdAt: -1 }).lean();
-    }
-    return devices;
+    return [];
 };
 
 // ----------------------------------------------------
@@ -113,17 +109,27 @@ const getDashboard = async (req, res) => {
         if (totalRatings > 0) {
             averageRating = parseFloat((sumParticularRatings / totalRatings).toFixed(2));
         } else {
-            // Fallback rating calculation if no 24-hour rating logs exist yet
-            const recentRatings = await ParticularRating.find().sort({ timestamp: -1 }).limit(50).lean();
-            if (recentRatings.length > 0) {
-                totalRatings = recentRatings.length;
-                const sum = recentRatings.reduce((acc, r) => acc + (Number(r.particularRating) || 0), 0);
-                averageRating = parseFloat((sum / totalRatings).toFixed(2));
-            } else if (totalToilets > 0) {
-                const statusScoreSum = (clean * 5.0) + (attention * 3.5) + (critical * 2.0);
-                averageRating = parseFloat((statusScoreSum / totalToilets).toFixed(1));
+            // Fallback rating calculation if no 24-hour rating logs exist yet (scoped to admin's devices)
+            if (adminDeviceUids.length > 0) {
+                const recentRatings = await ParticularRating.find({
+                    $or: [
+                        { device: { $in: adminDeviceIds } },
+                        { device_uid: { $in: uidsRegex } }
+                    ]
+                }).sort({ timestamp: -1 }).limit(50).lean();
+
+                if (recentRatings.length > 0) {
+                    totalRatings = recentRatings.length;
+                    const sum = recentRatings.reduce((acc, r) => acc + (Number(r.particularRating) || 0), 0);
+                    averageRating = parseFloat((sum / totalRatings).toFixed(2));
+                } else if (totalToilets > 0) {
+                    const statusScoreSum = (clean * 5.0) + (attention * 3.5) + (critical * 2.0);
+                    averageRating = parseFloat((statusScoreSum / totalToilets).toFixed(1));
+                } else {
+                    averageRating = 0.0;
+                }
             } else {
-                averageRating = 5.0;
+                averageRating = 0.0;
             }
         }
 

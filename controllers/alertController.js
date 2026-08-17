@@ -103,12 +103,12 @@ const getAlerts = async (req, res) => {
                 return res.status(200).json({ success: true, count: 0, alerts: [] });
             }
 
-        } else if (req.user && req.user.role === 'admin') {
+        } else if (req.user && (req.user.role === 'admin' || req.user.id)) {
             // Find devices registered by this admin
             myDevices = await Device.find({ adminId: req.user.id }).select("_id device_uid deviceId location floor").lean();
 
             if (myDevices.length === 0) {
-                // Admin has no registered devices -> Return 0 alert cards (Requirement 2 & Case 2)
+                // Admin has no registered devices -> Return 0 alert cards
                 return res.status(200).json({ success: true, count: 0, alerts: [] });
             }
 
@@ -128,7 +128,7 @@ const getAlerts = async (req, res) => {
 
             query.$or = alertConditions;
         } else {
-            myDevices = await Device.find().select("_id device_uid deviceId location floor").lean();
+            return res.status(200).json({ success: true, count: 0, alerts: [] });
         }
 
         const deviceMap = {};
