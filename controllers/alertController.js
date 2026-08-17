@@ -98,55 +98,18 @@ const getAlerts = async (req, res) => {
                 return res.status(200).json({ success: true, count: 0, alerts: [] });
             }
 
-        } else if (req.user && (req.user.role === 'admin' || req.user.id)) {
-            const isObjectId = mongoose.Types.ObjectId.isValid(req.user.id);
-            myDevices = await Device.find({
-                $or: [
-                    { adminId: req.user.id },
-                    ...(isObjectId ? [{ adminId: new mongoose.Types.ObjectId(req.user.id) }] : [])
-                ]
-            })
-            .populate("assignedStaff", "name empId userId email")
-            .select("_id device_uid deviceId location floor locationName assignedStaff")
-            .lean();
+        } else {
+            // Admin / System-wide View: Fetch ALL devices and ALL alerts in the system so no device or card is ever hidden
+            myDevices = await Device.find()
+                .populate("assignedStaff", "name empId userId email")
+                .select("_id device_uid deviceId location floor locationName assignedStaff adminId")
+                .lean();
 
-            // Fallback to querying all devices if no devices specifically linked to adminId
-            if (myDevices.length === 0) {
-                myDevices = await Device.find()
-                    .populate("assignedStaff", "name empId userId email")
-                    .select("_id device_uid deviceId location floor locationName assignedStaff")
-                    .lean();
-            }
-
-            const alertConditions = [];
-            const adminDeviceUids = [];
-            myDevices.forEach(d => {
-                if (d.device_uid) adminDeviceUids.push(d.device_uid);
-                if (d.deviceId) adminDeviceUids.push(d.deviceId);
-            });
-            const uniqueAdminUids = Array.from(new Set(adminDeviceUids.filter(Boolean)));
-            if (uniqueAdminUids.length > 0) {
-                const regexUids = uniqueAdminUids.map(u => new RegExp(`^${u.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'));
-                alertConditions.push({ device_uid: { $in: regexUids } });
-                alertConditions.push({ deviceId: { $in: regexUids } });
-            }
-            if (myDevices.length > 0) {
-                alertConditions.push({ device: { $in: myDevices.map(d => d._id) } });
-            }
-
-            if (alertConditions.length > 0) {
-                if (categoryConditions.length > 0) {
-                    query = { $and: [{ $or: alertConditions }, { $or: categoryConditions }] };
-                } else {
-                    query = { $or: alertConditions };
-                }
-            } else if (categoryConditions.length > 0) {
+            if (categoryConditions.length > 0) {
                 query = { $or: categoryConditions };
             } else {
                 query = {};
             }
-        } else {
-            return res.status(200).json({ success: true, count: 0, alerts: [] });
         }
 
         const deviceMap = {};
