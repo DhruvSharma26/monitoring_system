@@ -405,9 +405,7 @@ function connectMQTT() {
             await targetDev.save();
           }
         }
-        }
-
-      } catch (error) {
+        } catch (error) {
         console.log("❌ MQTT Processing Error:", error.message);
       }
     });

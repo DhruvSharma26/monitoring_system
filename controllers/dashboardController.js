@@ -1,3 +1,4 @@
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const mongoose = require("mongoose");
 const Device = require("../models/Device");
 const LatestDeviceStatus = require("../models/LatestDeviceStatus");
@@ -151,7 +152,7 @@ const getDashboard = async (req, res) => {
             dayEnd.setDate(now.getDate() - i);
             dayEnd.setHours(23, 59, 59, 999);
 
-            const dayLabel = dayNames[dayStart.getDay()];
+            const dayLabel = DAY_NAMES[dayStart.getDay()];
             const targetDateStr = `${dayStart.getFullYear()}-${String(dayStart.getMonth() + 1).padStart(2, '0')}-${String(dayStart.getDate()).padStart(2, '0')}`;
 
             const dayLogs = sensorLogs7Days.filter(log => {
