@@ -93,6 +93,10 @@ const getToilets = async (req, res) => {
                 }
             }
 
+            const latestDateStr = latestStatus.timestamp ? new Date(latestStatus.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : null;
+            const todayDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+            const isToday = Boolean(latestDateStr && latestDateStr === todayDateStr);
+
             // 2. Status Calculation: Driven by latest MQTT telemetry (if normal, keep clean)
             let toiletStatus = "Clean";
             if (latestStatus && (latestStatus.Counter !== undefined || latestStatus.OdorSensVal !== undefined || latestStatus.feedback !== undefined)) {

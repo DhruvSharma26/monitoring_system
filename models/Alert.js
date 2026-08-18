@@ -79,7 +79,8 @@ const alertSchema = new mongoose.Schema(
             "IN_PROGRESS",
             "REJECTED",
             "VERIFIED",
-            "RESOLVED"
+            "RESOLVED",
+            "EXPIRED"
         ],
         default: "OPEN"
     },

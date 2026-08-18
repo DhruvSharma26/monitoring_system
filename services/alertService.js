@@ -131,16 +131,37 @@ const processOrCreateDeviceAlertInternal = async (alertData) => {
             status: { $in: ["OPEN", "ASSIGNED"] }
         }).sort({ createdAt: -1 });
 
+        const now = new Date();
+        const todayDateStr = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+
         let existingUnassignedAlert = null;
         for (const alt of openAlerts) {
+            const altDateStr = new Date(alt.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
             const linkedTask = await Task.findOne({
                 alert: alt._id,
-                status: { $nin: ["CANCELLED"] }
+                status: { $nin: ["CANCELLED", "EXPIRED"] }
             });
 
-            if (!linkedTask || linkedTask.status === "ASSIGNED") {
+            const isStarted = linkedTask && (linkedTask.startedAt || linkedTask.status === "IN_PROGRESS" || linkedTask.status === "SUBMITTED" || linkedTask.status === "COMPLETED" || linkedTask.status === "VERIFIED");
+
+            if (altDateStr === todayDateStr && !isStarted) {
+                // Same calendar day & unstarted alert -> Overwrite this alert card with new telemetry
                 existingUnassignedAlert = alt;
                 break;
+            } else if (altDateStr !== todayDateStr) {
+                // Unresolved alert from a previous calendar day -> Mark EXPIRED
+                await Alert.updateOne(
+                    { _id: alt._id },
+                    { $set: { status: "EXPIRED", assignmentStatus: "EXPIRED" } }
+                );
+
+                if (linkedTask && linkedTask.status !== "VERIFIED" && linkedTask.status !== "COMPLETED") {
+                    await Task.updateOne(
+                        { _id: linkedTask._id },
+                        { $set: { status: "EXPIRED" } }
+                    );
+                }
+                console.log(`⏰ Previous day unresolved alert ${alt._id} for device [${targetUid}] marked EXPIRED.`);
             }
         }
 
