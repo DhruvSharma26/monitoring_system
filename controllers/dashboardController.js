@@ -359,8 +359,9 @@ const formatAlertItem = (alertDoc, deviceMap = {}) => {
     alertItem.alertType = alertItem.alertType || alertItem.alertCategory || 'NEEDS_ATTENTION';
     alertItem.category = alertItem.alertCategory;
     alertItem.type = alertItem.alertType;
-    alertItem.title = alertItem.alertType || alertItem.alertCategory || 'Alert';
-    alertItem.timestamp = alertItem.createdAt;
+    const latestTime = alertItem.updatedAt || alertItem.createdAt;
+    alertItem.timestamp = latestTime;
+    alertItem.createdAt = latestTime;
 
     return alertItem;
 };

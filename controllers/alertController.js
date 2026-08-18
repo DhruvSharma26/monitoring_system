@@ -315,8 +315,9 @@ const getAlerts = async (req, res) => {
             alertItem.alertType = alertItem.alertType || alertItem.alertCategory || 'NEEDS_ATTENTION';
             alertItem.category = alertItem.alertCategory;
             alertItem.type = alertItem.alertType;
-            alertItem.title = alertItem.alertType || alertItem.alertCategory || 'Alert';
-            alertItem.timestamp = alertItem.createdAt;
+            const latestTime = alertItem.updatedAt || alertItem.createdAt;
+            alertItem.timestamp = latestTime;
+            alertItem.createdAt = latestTime;
 
             if (alertItem.staffId) {
                 const staffObj = {
@@ -420,8 +421,9 @@ const getAlerts = async (req, res) => {
                 completedAt: task.completedAt,
                 verifiedAt: task.verifiedAt,
                 resolvedAt: task.resolvedAt || task.verifiedAt || task.completedAt,
-                createdAt: task.createdAt || new Date(),
-                timestamp: task.createdAt || new Date(),
+                updatedAt: task.updatedAt || task.createdAt || new Date(),
+                createdAt: task.updatedAt || task.createdAt || new Date(),
+                timestamp: task.updatedAt || task.createdAt || new Date(),
                 staffId: staffIdStr,
                 assignedStaffName: staffNameStr,
                 assignedStaffEmpId: staffEmpStr,
@@ -486,10 +488,10 @@ const getAlerts = async (req, res) => {
             }
         }
 
-        // Sort all merged alerts/tasks by timestamp descending (newest first)
+        // Sort all merged alerts/tasks by latest activity timestamp descending (newest first)
         finalAlerts.sort((a, b) => {
-            const timeA = new Date(a.createdAt || a.timestamp || a.assignedAt || a.updatedAt || 0).getTime();
-            const timeB = new Date(b.createdAt || b.timestamp || b.assignedAt || b.updatedAt || 0).getTime();
+            const timeA = new Date(a.updatedAt || a.timestamp || a.assignedAt || a.createdAt || 0).getTime();
+            const timeB = new Date(b.updatedAt || b.timestamp || b.assignedAt || b.createdAt || 0).getTime();
             return timeB - timeA;
         });
 
