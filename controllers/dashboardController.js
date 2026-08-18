@@ -36,13 +36,23 @@ const getDashboard = async (req, res) => {
 
         let liveAlerts = [];
         if (adminDeviceUids.length > 0) {
-            liveAlerts = await Alert.find({
+            const deviceMap = {};
+            devices.forEach(d => {
+                if (d.device_uid) deviceMap[d.device_uid.toLowerCase()] = d;
+                if (d.deviceId) deviceMap[d.deviceId.toLowerCase()] = d;
+                if (d._id) deviceMap[d._id.toString().toLowerCase()] = d;
+            });
+
+            const rawAlerts = await Alert.find({
                 $or: [
                     { device: { $in: adminDeviceIds } },
-                    { device_uid: { $in: uidsRegex } }
+                    { device_uid: { $in: uidsRegex } },
+                    { deviceId: { $in: uidsRegex } }
                 ],
-                status: "OPEN"
+                status: { $in: ["OPEN", "ASSIGNED"] }
             }).sort({ createdAt: -1 }).limit(5).lean();
+
+            liveAlerts = rawAlerts.map(a => formatAlertItem(a, deviceMap));
         }
 
         // Count current status of devices
@@ -285,6 +295,76 @@ const getMapData = async (req, res) => {
     }
 };
 
+const formatAlertItem = (alertDoc, deviceMap = {}) => {
+    const alertItem = { ...alertDoc };
+    const devKey = (alertItem.device_uid || alertItem.deviceId || (alertItem.device ? alertItem.device.toString() : '') || '').toLowerCase();
+    const devInfo = deviceMap[devKey];
+
+    if (devInfo) {
+        alertItem.device = devInfo;
+        alertItem.deviceId = devInfo.deviceId || alertItem.device_uid;
+        alertItem.deviceLocation = `${devInfo.location || devInfo.locationName || ''}${devInfo.floor ? ' - Floor ' + devInfo.floor : ''}`;
+    } else {
+        alertItem.device = {
+            _id: alertItem.device || null,
+            device_uid: alertItem.device_uid || 'Device',
+            deviceId: alertItem.deviceId || alertItem.device_uid || 'Device',
+            location: alertItem.device_uid || 'Location',
+            floor: ''
+        };
+        alertItem.deviceId = alertItem.device_uid || 'Device';
+        alertItem.deviceLocation = alertItem.device_uid || 'Location';
+    }
+
+    const deviceStaff = devInfo ? devInfo.assignedStaff : null;
+    if (deviceStaff) {
+        alertItem.assignmentStatus = "ASSIGNED";
+        alertItem.isAssigned = true;
+        alertItem.staffId = deviceStaff._id ? deviceStaff._id.toString() : deviceStaff.toString();
+        alertItem.assignedStaffName = deviceStaff.name || "";
+        alertItem.assignedStaffEmpId = deviceStaff.empId || deviceStaff.userId || "";
+    } else {
+        alertItem.assignmentStatus = "NOT_ASSIGNED";
+        alertItem.isAssigned = false;
+        alertItem.staffId = null;
+        alertItem.assignedStaffName = null;
+        alertItem.assignedStaffEmpId = null;
+    }
+
+    const counterVal = alertItem.Counter ?? alertItem.CounterValue ?? alertItem.counterValue ?? alertItem.counterThreshold ?? alertItem.counter ?? 0;
+    const odorVal = alertItem.OdorSensVal ?? alertItem.OdorLevel ?? alertItem.odorValue ?? alertItem.odorThreshold ?? alertItem.odor ?? 0;
+    const feedbackVal = alertItem.feedback ?? alertItem.rating ?? alertItem.feedbackValue ?? 0;
+    const descStr = alertItem.description || alertItem.adminRemarks || alertItem.alertType || 'Alert triggered';
+
+    alertItem.id = alertItem._id;
+    alertItem.alertId = alertItem._id;
+    alertItem.counter = counterVal;
+    alertItem.Counter = counterVal;
+    alertItem.CounterValue = counterVal;
+    alertItem.counterValue = counterVal;
+    alertItem.odor = odorVal;
+    alertItem.OdorSensVal = odorVal;
+    alertItem.OdorLevel = odorVal;
+    alertItem.odorValue = odorVal;
+    alertItem.feedback = feedbackVal;
+    alertItem.rating = feedbackVal;
+    alertItem.feedbackValue = feedbackVal;
+    alertItem.description = descStr;
+    alertItem.message = descStr;
+    alertItem.remarks = alertItem.adminRemarks || descStr;
+    alertItem.location = alertItem.deviceLocation;
+    alertItem.locationName = devInfo ? (devInfo.locationName || devInfo.location || '') : alertItem.deviceLocation;
+    alertItem.floor = devInfo ? (devInfo.floor || '') : '';
+    alertItem.alertCategory = alertItem.alertCategory || (alertItem.toiletStatus ? alertItem.toiletStatus : 'Need Attention');
+    alertItem.alertType = alertItem.alertType || alertItem.alertCategory || 'NEEDS_ATTENTION';
+    alertItem.category = alertItem.alertCategory;
+    alertItem.type = alertItem.alertType;
+    alertItem.title = alertItem.alertType || alertItem.alertCategory || 'Alert';
+    alertItem.timestamp = alertItem.createdAt;
+
+    return alertItem;
+};
+
 // ----------------------------------------------------
 // Live Alerts
 // ----------------------------------------------------
@@ -300,13 +380,23 @@ const getLiveAlerts = async (req, res) => {
 
         let alerts = [];
         if (adminDeviceUids.length > 0) {
-            alerts = await Alert.find({
+            const deviceMap = {};
+            devices.forEach(d => {
+                if (d.device_uid) deviceMap[d.device_uid.toLowerCase()] = d;
+                if (d.deviceId) deviceMap[d.deviceId.toLowerCase()] = d;
+                if (d._id) deviceMap[d._id.toString().toLowerCase()] = d;
+            });
+
+            const rawAlerts = await Alert.find({
                 $or: [
                     { device: { $in: adminDeviceIds } },
-                    { device_uid: { $in: uidsRegex } }
+                    { device_uid: { $in: uidsRegex } },
+                    { deviceId: { $in: uidsRegex } }
                 ],
-                status: "OPEN"
+                status: { $in: ["OPEN", "ASSIGNED"] }
             }).sort({ createdAt: -1 }).limit(10).lean();
+
+            alerts = rawAlerts.map(a => formatAlertItem(a, deviceMap));
         }
 
         res.status(200).json({

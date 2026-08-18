@@ -271,9 +271,17 @@ const getAlerts = async (req, res) => {
             }
 
             if (devInfo) {
+                alertItem.device = devInfo;
                 alertItem.deviceId = devInfo.deviceId || alertItem.device_uid;
                 alertItem.deviceLocation = `${devInfo.location || devInfo.locationName || ''}${devInfo.floor ? ' - Floor ' + devInfo.floor : ''}`;
             } else {
+                alertItem.device = {
+                    _id: alertItem.device || null,
+                    device_uid: alertItem.device_uid || 'Device',
+                    deviceId: alertItem.deviceId || alertItem.device_uid || 'Device',
+                    location: alertItem.device_uid || 'Location',
+                    floor: ''
+                };
                 alertItem.deviceId = alertItem.device_uid || 'Device';
                 alertItem.deviceLocation = alertItem.device_uid || 'Location';
             }
