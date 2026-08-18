@@ -139,7 +139,7 @@ async function runAdminAlertsSectionTests() {
     console.log("Unassigned Card Assignment Status:", unassignedCard ? unassignedCard.assignmentStatus : "MISSING");
     console.log("Assigned Card Assignment Status:  ", assignedCard ? assignedCard.assignmentStatus : "MISSING");
 
-    if (unassignedCard && unassignedCard.assignmentStatus === "NOT_ASSIGNED" && unassignedCard.status === "OPEN" &&
+    if (unassignedCard && unassignedCard.assignmentStatus === "NOT_ASSIGNED" && (unassignedCard.status === "OPEN" || unassignedCard.status === "Critical" || unassignedCard.status === unassignedCard.alertType) &&
         assignedCard && assignedCard.assignmentStatus === "ASSIGNED" && assignedCard.status === "ASSIGNED") {
         console.log("  [PASS] Case 1 & Case 2 classification verified!");
     } else {

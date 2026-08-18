@@ -315,6 +315,13 @@ const getAlerts = async (req, res) => {
             alertItem.alertType = alertItem.alertType || alertItem.alertCategory || 'NEEDS_ATTENTION';
             alertItem.category = alertItem.alertCategory;
             alertItem.type = alertItem.alertType;
+
+            if (alertItem.assignmentStatus === "NOT_ASSIGNED" || !alertItem.isAssigned || alertItem.status === "OPEN") {
+                alertItem.status = alertItem.alertType || alertItem.alertCategory || alertItem.status || "Critical";
+                alertItem.adminRemarks = "";
+                alertItem.remarks = alertItem.description || alertItem.alertType || 'Alert triggered';
+            }
+
             const latestTime = alertItem.updatedAt || alertItem.createdAt;
             alertItem.timestamp = latestTime;
             alertItem.createdAt = latestTime;

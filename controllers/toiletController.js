@@ -38,15 +38,20 @@ const getToiletDetails = async (req, res) => {
             Alert.find({
                 $or: [{ device_uid: { $in: regexUids } }, { deviceId: { $in: regexUids } }]
             }).sort({ createdAt: -1 }).limit(10).lean(),
-            Task.find({ device: device._id }).populate("staff").sort({ createdAt: -1 }),
+            Task.find({
+                $or: [{ device: device._id }, { device_uid: { $in: regexUids } }, { deviceId: { $in: regexUids } }]
+            }).populate("staff").sort({ createdAt: -1 }),
             User.findOne({ assignedDevice: device._id }).lean(),
             SensorData.find({
                 $or: [{ device_uid: { $in: regexUids } }, { deviceId: { $in: regexUids } }],
                 timestamp: { $gte: sevenDaysAgo }
             }).sort({ timestamp: 1 }).lean(),
-            Task.findOne({ device: device._id, status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] } }).populate("staff", "name empId userId").sort({ updatedAt: -1 }).lean(),
+            Task.findOne({
+                $or: [{ device: device._id }, { device_uid: { $in: regexUids } }, { deviceId: { $in: regexUids } }],
+                status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] }
+            }).populate("staff", "name empId userId").sort({ updatedAt: -1 }).lean(),
             Task.find({
-                device: device._id,
+                $or: [{ device: device._id }, { device_uid: { $in: regexUids } }, { deviceId: { $in: regexUids } }],
                 status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] },
                 updatedAt: { $gte: sevenDaysAgo }
             }).lean(),
@@ -59,8 +64,20 @@ const getToiletDetails = async (req, res) => {
         const warningOdorThreshold = Math.round(odorThreshold * 0.75);
         const warningCounterThreshold = Math.round(counterThreshold * 0.75);
 
+        // 2. Status Calculation: Unresolved active alert holds toilet status until resolved
         let status = "Clean";
-        if (latestStatus && latestStatus.timestamp) {
+        const openAlertsForDevice = (alerts || []).filter(a => a.status === "OPEN" || a.status === "ASSIGNED");
+        if (openAlertsForDevice.length > 0) {
+            const hasCritical = openAlertsForDevice.some(a => {
+                const cat = (a.alertCategory || a.alertType || a.toiletStatus || '').toLowerCase();
+                return cat.includes('critical');
+            });
+            if (hasCritical) {
+                status = "Critical";
+            } else {
+                status = "Need Attention";
+            }
+        } else if (latestStatus && latestStatus.timestamp) {
             const latestDateStr = new Date(latestStatus.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
             const todayDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
             if (latestDateStr === todayDateStr) {
@@ -146,34 +163,39 @@ const getToiletDetails = async (req, res) => {
 
             let dayCounter = 0;
             let dayOdor = 0;
+            let dayRating = 5.0;
+
             if (dayLogs.length > 0) {
                 // Max / Peak counter for the day
                 for (const l of dayLogs) {
-                    const c = Number(l.Counter) || 0;
+                    const c = Number(l.Counter ?? l.CounterValue ?? l.counterValue ?? l.counter) || 0;
                     if (c > dayCounter) dayCounter = c;
                 }
 
                 // Average odor
                 let sumOdor = 0;
                 for (const l of dayLogs) {
-                    sumOdor += Number(l.OdorSensVal) || 0;
+                    sumOdor += Number(l.OdorSensVal ?? l.OdorLevel ?? l.odorValue ?? l.odor) || 0;
                 }
                 dayOdor = Math.round(sumOdor / dayLogs.length);
 
                 // Rating calculation using ratingService
                 const explicitLogs = dayLogs.filter(l => l.feedback !== undefined && l.feedback !== null && Number(l.feedback) > 0);
                 if (explicitLogs.length > 0) {
-                    const sumRating = explicitLogs.reduce((acc, l) => acc + ratingService.calculateParticularRating(l.Counter, l.OdorSensVal, l.feedback), 0);
+                    const sumRating = explicitLogs.reduce((acc, l) => acc + ratingService.calculateParticularRating(l.Counter ?? l.CounterValue, l.OdorSensVal ?? l.OdorLevel, l.feedback), 0);
                     dayRating = parseFloat((sumRating / explicitLogs.length).toFixed(1));
                 } else {
-                    const sumRating = dayLogs.reduce((acc, l) => acc + ratingService.calculateParticularRating(l.Counter, l.OdorSensVal, l.feedback || 4), 0);
+                    const sumRating = dayLogs.reduce((acc, l) => acc + ratingService.calculateParticularRating(l.Counter ?? l.CounterValue, l.OdorSensVal ?? l.OdorLevel, l.feedback || 4), 0);
                     dayRating = parseFloat((sumRating / dayLogs.length).toFixed(1));
                 }
             } else if (i === 0 && latestStatus) {
                 // Fallback for today if live telemetry exists
-                dayCounter = Number(latestStatus.Counter) || 0;
-                dayOdor = Number(latestStatus.OdorSensVal) || 0;
-                dayRating = ratingService.calculateParticularRating(latestStatus.Counter, latestStatus.OdorSensVal, latestStatus.feedback || 4);
+                const curC = Number(latestStatus.Counter ?? latestStatus.CounterValue) || 0;
+                const curO = Number(latestStatus.OdorSensVal ?? latestStatus.OdorLevel) || 0;
+                dayCounter = curC;
+                dayOdor = curO;
+                const rawR = ratingService.calculateParticularRating(curC, curO, latestStatus.feedback || 4);
+                dayRating = parseFloat((Number(rawR) || 5.0).toFixed(1));
             } else {
                 dayCounter = 0;
                 dayOdor = 0;
@@ -257,6 +279,10 @@ const getToiletDetails = async (req, res) => {
                 ratingHistory,
                 cleaningHistory
             },
+            counterHistory,
+            odorHistory,
+            ratingHistory,
+            cleaningHistory,
             staff,
             alerts,
             tasks,

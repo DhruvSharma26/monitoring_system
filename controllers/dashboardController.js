@@ -20,6 +20,84 @@ const getAdminDevices = async (adminId) => {
     return [];
 };
 
+const resolveDeviceStatuses = async (devices, adminId) => {
+    if (!devices || devices.length === 0) return [];
+    
+    const LatestDeviceStatus = require("../models/LatestDeviceStatus");
+    const Settings = require("../models/Settings");
+    const Alert = require("../models/Alert");
+    const { classifyTelemetry } = require("../services/alertClassifier");
+
+    const [statuses, openAlerts, settings] = await Promise.all([
+        LatestDeviceStatus.find().lean(),
+        Alert.find({ status: { $in: ["OPEN", "ASSIGNED"] } }).lean(),
+        Settings.findOne({ adminId }).lean()
+    ]);
+
+    const userSettings = settings || (await Settings.findOne().lean());
+
+    const statusMap = {};
+    (statuses || []).forEach(item => {
+        if (item.device_uid) statusMap[item.device_uid.toLowerCase()] = item;
+        if (item.deviceId) statusMap[item.deviceId.toLowerCase()] = item;
+    });
+
+    const todayDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+
+    return devices.map(device => {
+        const devUids = [device.device_uid, device.deviceId, device._id ? device._id.toString() : null].filter(Boolean);
+        
+        // Find unresolved open alerts for this device
+        const activeAlertsForDev = (openAlerts || []).filter(a => {
+            const aDevId = String(a.device || '');
+            const aUid = String(a.device_uid || '').toLowerCase();
+            const aDeviceId = String(a.deviceId || '').toLowerCase();
+            return (device._id && String(device._id) === aDevId) ||
+                   devUids.some(u => u.toLowerCase() === aUid || u.toLowerCase() === aDeviceId);
+        });
+
+        let toiletStatus = "Clean";
+        if (activeAlertsForDev.length > 0) {
+            const hasCritical = activeAlertsForDev.some(a => {
+                const cat = (a.alertCategory || a.alertType || a.toiletStatus || '').toLowerCase();
+                return cat.includes('critical');
+            });
+            if (hasCritical) {
+                toiletStatus = "Critical";
+            } else {
+                toiletStatus = "Need Attention";
+            }
+        } else {
+            let latestStatus = null;
+            for (const u of devUids) {
+                if (statusMap[u.toLowerCase()]) {
+                    latestStatus = statusMap[u.toLowerCase()];
+                    break;
+                }
+            }
+
+            if (latestStatus && latestStatus.timestamp) {
+                const latestDateStr = new Date(latestStatus.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+                if (latestDateStr === todayDateStr) {
+                    const classification = classifyTelemetry(
+                        latestStatus.feedback,
+                        latestStatus.Counter,
+                        latestStatus.OdorSensVal,
+                        userSettings
+                    );
+                    toiletStatus = classification.toiletStatus || "Clean";
+                }
+            }
+        }
+
+        return {
+            ...device,
+            status: toiletStatus,
+            computedStatus: toiletStatus
+        };
+    });
+};
+
 // ----------------------------------------------------
 // Dashboard Summary
 // ----------------------------------------------------
@@ -55,17 +133,18 @@ const getDashboard = async (req, res) => {
             liveAlerts = rawAlerts.map(a => formatAlertItem(a, deviceMap));
         }
 
-        // Count current status of devices
-        const totalToilets = devices.length;
+        // Compute live dynamic status of devices using resolveDeviceStatuses (same logic as Toilet Screen)
+        const devicesWithStatus = await resolveDeviceStatuses(devices, adminId);
+        const totalToilets = devicesWithStatus.length;
         let clean = 0;
         let attention = 0;
         let critical = 0;
 
-        devices.forEach(device => {
-            const st = (device.status || 'clean').toLowerCase();
+        devicesWithStatus.forEach(device => {
+            const st = (device.computedStatus || 'Clean').toLowerCase().trim();
             if (st === 'critical') {
                 critical++;
-            } else if (st === 'warning' || st === 'attention' || st === 'needs_attention') {
+            } else if (st.includes('attention') || st === 'warning') {
                 attention++;
             } else {
                 clean++;
@@ -359,6 +438,13 @@ const formatAlertItem = (alertDoc, deviceMap = {}) => {
     alertItem.alertType = alertItem.alertType || alertItem.alertCategory || 'NEEDS_ATTENTION';
     alertItem.category = alertItem.alertCategory;
     alertItem.type = alertItem.alertType;
+
+    if (alertItem.assignmentStatus === "NOT_ASSIGNED" || !alertItem.isAssigned || alertItem.status === "OPEN") {
+        alertItem.status = alertItem.alertType || alertItem.alertCategory || alertItem.status || "Critical";
+        alertItem.adminRemarks = "";
+        alertItem.remarks = alertItem.description || alertItem.alertType || 'Alert triggered';
+    }
+
     const latestTime = alertItem.updatedAt || alertItem.createdAt;
     alertItem.timestamp = latestTime;
     alertItem.createdAt = latestTime;
@@ -421,10 +507,11 @@ const getLiveAlerts = async (req, res) => {
 const getAttentionCriticalToilets = async (req, res) => {
     try {
         const adminId = req.user ? (req.user.id || req.user._id) : null;
-        const devices = await getAdminDevices(adminId);
+        const rawDevices = await getAdminDevices(adminId);
+        const devicesWithStatus = await resolveDeviceStatuses(rawDevices, adminId);
 
-        const toilets = devices.filter(d => {
-            const st = (d.status || 'clean').toLowerCase().trim();
+        const toilets = devicesWithStatus.filter(d => {
+            const st = (d.computedStatus || 'Clean').toLowerCase().trim();
             return st === 'critical' || st.includes('attention') || st === 'warning';
         }).map(d => ({
             device_uid: d.device_uid,
@@ -433,7 +520,7 @@ const getAttentionCriticalToilets = async (req, res) => {
             floor: d.floor,
             latitude: d.latitude,
             longitude: d.longitude,
-            status: (d.status || '').toLowerCase().trim() === 'critical' ? "Critical" : "Need Attention"
+            status: d.computedStatus
         }));
 
         res.status(200).json({

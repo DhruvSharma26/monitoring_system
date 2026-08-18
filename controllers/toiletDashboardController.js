@@ -41,8 +41,10 @@ const getToilets = async (req, res) => {
         const devices = adminDevices;
 
         const Settings = require("../models/Settings");
-        const [statuses, completedTasks, allActiveAssignments, settings] = await Promise.all([
+        const Alert = require("../models/Alert");
+        const [statuses, openAlerts, completedTasks, allActiveAssignments, settings] = await Promise.all([
             LatestDeviceStatus.find().lean(),
+            Alert.find({ status: { $in: ["OPEN", "ASSIGNED"] } }).lean(),
             Task.find({ status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] } })
                 .populate("staff", "name empId userId")
                 .sort({ updatedAt: -1 })
@@ -91,13 +93,31 @@ const getToilets = async (req, res) => {
                 }
             }
 
-            // 2. Status Calculation ("Clean", "Need Attention", "Critical")
-            let toiletStatus = "Clean";
+            // 2. Status Calculation: Unresolved active alert holds toilet status until resolved
+            const activeAlertsForDev = (openAlerts || []).filter(a => {
+                const aDevId = String(a.device || '');
+                const aUid = String(a.device_uid || '').toLowerCase();
+                const aDeviceId = String(a.deviceId || '').toLowerCase();
+                return (device._id && String(device._id) === aDevId) ||
+                       devUids.some(u => u.toLowerCase() === aUid || u.toLowerCase() === aDeviceId);
+            });
+
             const latestDateStr = latestStatus.timestamp ? new Date(latestStatus.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : null;
             const todayDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
             const isToday = Boolean(latestDateStr && latestDateStr === todayDateStr);
 
-            if (isToday) {
+            let toiletStatus = "Clean";
+            if (activeAlertsForDev.length > 0) {
+                const hasCritical = activeAlertsForDev.some(a => {
+                    const cat = (a.alertCategory || a.alertType || a.toiletStatus || '').toLowerCase();
+                    return cat.includes('critical');
+                });
+                if (hasCritical) {
+                    toiletStatus = "Critical";
+                } else {
+                    toiletStatus = "Need Attention";
+                }
+            } else if (isToday) {
                 const { classifyTelemetry } = require("../services/alertClassifier");
                 const classification = classifyTelemetry(
                     latestStatus.feedback,
