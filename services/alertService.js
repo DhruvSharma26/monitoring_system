@@ -122,10 +122,13 @@ const processOrCreateDeviceAlertInternal = async (alertData) => {
 
         const initialAlertStatus = assignedStaffId ? "ASSIGNED" : "OPEN";
 
+        const devRegexUid = new RegExp(`^${targetUid.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i');
+        const devRegexDevId = targetDevId ? new RegExp(`^${targetDevId.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i') : null;
+
         const openAlerts = await Alert.find({
             $or: [
-                { device_uid: targetUid },
-                { deviceId: targetDevId },
+                { device_uid: devRegexUid },
+                ...(devRegexDevId ? [{ deviceId: devRegexDevId }] : []),
                 ...(device ? [{ device: device._id }] : [])
             ],
             status: { $in: ["OPEN", "ASSIGNED"] }
@@ -136,7 +139,7 @@ const processOrCreateDeviceAlertInternal = async (alertData) => {
 
         let existingUnassignedAlert = null;
         for (const alt of openAlerts) {
-            const altDateStr = new Date(alt.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+            const altDateStr = new Date(alt.createdAt || alt.updatedAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
             const linkedTask = await Task.findOne({
                 alert: alt._id,
                 status: { $nin: ["CANCELLED", "EXPIRED"] }
