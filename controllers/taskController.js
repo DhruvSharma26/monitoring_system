@@ -122,11 +122,10 @@ const startTask = async (req, res) => {
             return res.status(404).json({ success: false, message: "Task not found" });
         }
 
-        // Validate that task is assigned to this staff member (if staff)
-        if (req.user && req.user.role === "staff" && task.staff && task.staff.toString() !== req.user.id.toString()) {
-            return res.status(403).json({
+        if (task.status === "EXPIRED") {
+            return res.status(400).json({
                 success: false,
-                message: "You are not authorized to start a task assigned to another staff member."
+                message: "This task has expired and can no longer be started."
             });
         }
 
@@ -438,6 +437,13 @@ const reassignTask = async (req, res) => {
 
         if (!task) {
             return res.status(404).json({ success: false, message: "Task not found" });
+        }
+
+        if (task.status === "EXPIRED") {
+            return res.status(400).json({
+                success: false,
+                message: "This task has expired and can no longer be reassigned."
+            });
         }
 
         // ENFORCE REASSIGNMENT LOCK: Cannot reassign if task has already been started

@@ -593,13 +593,11 @@ const resolveAlert = async (req, res) => {
         const alert =
         await Alert.findById(alertId);
 
-        if (!alert) {
-
-            return res.status(404).json({
+        if (alert.status === "EXPIRED" || alert.assignmentStatus === "EXPIRED") {
+            return res.status(400).json({
                 success: false,
-                message: "Alert not found"
+                message: "This alert has expired and can no longer be resolved."
             });
-
         }
 
         const now = new Date();
