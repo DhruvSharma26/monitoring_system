@@ -386,7 +386,11 @@ const formatAlertItem = (alertDoc, deviceMap = {}) => {
     }
 
     const deviceStaff = devInfo ? devInfo.assignedStaff : null;
-    if (deviceStaff) {
+    if (alertItem.status === "EXPIRED" || alertItem.assignmentStatus === "EXPIRED") {
+        alertItem.status = "EXPIRED";
+        alertItem.assignmentStatus = "EXPIRED";
+        alertItem.isExpired = true;
+    } else if (deviceStaff) {
         alertItem.assignmentStatus = "ASSIGNED";
         alertItem.isAssigned = true;
         alertItem.staffId = deviceStaff._id ? deviceStaff._id.toString() : deviceStaff.toString();
@@ -428,8 +432,16 @@ const formatAlertItem = (alertDoc, deviceMap = {}) => {
     alertItem.alertType = alertItem.alertType || alertItem.alertCategory || 'NEEDS_ATTENTION';
     alertItem.category = alertItem.alertCategory;
     alertItem.type = alertItem.alertType;
+    alertItem.originalStatus = alertItem.alertCategory;
+    alertItem.expiredAlertType = alertItem.alertCategory;
 
-    if (alertItem.assignmentStatus === "NOT_ASSIGNED" || !alertItem.isAssigned || alertItem.status === "OPEN") {
+    if (alertItem.status === "EXPIRED" || alertItem.assignmentStatus === "EXPIRED") {
+        alertItem.status = "EXPIRED";
+        alertItem.assignmentStatus = "EXPIRED";
+        alertItem.isExpired = true;
+        alertItem.adminRemarks = "";
+        alertItem.remarks = `EXPIRED (${alertItem.alertCategory}): Alert from previous day was not resolved`;
+    } else if (alertItem.status === "OPEN" || alertItem.assignmentStatus === "NOT_ASSIGNED") {
         alertItem.status = alertItem.alertType || alertItem.alertCategory || alertItem.status || "Critical";
         alertItem.adminRemarks = "";
         alertItem.remarks = alertItem.description || alertItem.alertType || 'Alert triggered';

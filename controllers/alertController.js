@@ -257,7 +257,7 @@ const getAlerts = async (req, res) => {
                 alertItem.staffId = null;
                 alertItem.assignedStaffName = null;
                 alertItem.assignedStaffEmpId = null;
-                if (alertItem.status !== "VERIFIED" && alertItem.status !== "RESOLVED" && alertItem.status !== "COMPLETED") {
+                if (alertItem.status !== "VERIFIED" && alertItem.status !== "RESOLVED" && alertItem.status !== "COMPLETED" && alertItem.status !== "EXPIRED") {
                     alertItem.status = "OPEN";
                 }
             }
@@ -315,8 +315,16 @@ const getAlerts = async (req, res) => {
             alertItem.alertType = alertItem.alertType || alertItem.alertCategory || 'NEEDS_ATTENTION';
             alertItem.category = alertItem.alertCategory;
             alertItem.type = alertItem.alertType;
+            alertItem.originalStatus = alertItem.alertCategory;
+            alertItem.expiredAlertType = alertItem.alertCategory;
 
-            if (alertItem.assignmentStatus === "NOT_ASSIGNED" || !alertItem.isAssigned || alertItem.status === "OPEN") {
+            if (alertItem.status === "EXPIRED" || alertItem.assignmentStatus === "EXPIRED") {
+                alertItem.status = "EXPIRED";
+                alertItem.assignmentStatus = "EXPIRED";
+                alertItem.isExpired = true;
+                alertItem.adminRemarks = "";
+                alertItem.remarks = `EXPIRED (${alertItem.alertCategory}): Alert from previous day was not resolved`;
+            } else if (alertItem.status === "OPEN" || alertItem.assignmentStatus === "NOT_ASSIGNED") {
                 alertItem.status = alertItem.alertType || alertItem.alertCategory || alertItem.status || "Critical";
                 alertItem.adminRemarks = "";
                 alertItem.remarks = alertItem.description || alertItem.alertType || 'Alert triggered';
