@@ -64,32 +64,26 @@ const getToiletDetails = async (req, res) => {
         const warningOdorThreshold = Math.round(odorThreshold * 0.75);
         const warningCounterThreshold = Math.round(counterThreshold * 0.75);
 
-        // 2. Status Calculation: Unresolved active alert holds toilet status until resolved
+        // 2. Status Calculation: Driven by latest MQTT telemetry
         let status = "Clean";
-        const openAlertsForDevice = (alerts || []).filter(a => a.status === "OPEN" || a.status === "ASSIGNED");
-        if (openAlertsForDevice.length > 0) {
-            const hasCritical = openAlertsForDevice.some(a => {
-                const cat = (a.alertCategory || a.alertType || a.toiletStatus || '').toLowerCase();
-                return cat.includes('critical');
-            });
-            if (hasCritical) {
-                status = "Critical";
-            } else {
-                status = "Need Attention";
-            }
-        } else if (latestStatus && latestStatus.timestamp) {
-            const latestDateStr = new Date(latestStatus.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-            const todayDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-            if (latestDateStr === todayDateStr) {
-                const { classifyTelemetry } = require("../services/alertClassifier");
-                const classification = classifyTelemetry(
-                    latestStatus.feedback,
-                    latestStatus.Counter,
-                    latestStatus.OdorSensVal,
-                    userSettings
-                );
+        if (latestStatus && (latestStatus.Counter !== undefined || latestStatus.OdorSensVal !== undefined || latestStatus.feedback !== undefined)) {
+            const { classifyTelemetry } = require("../services/alertClassifier");
+            const classification = classifyTelemetry(
+                latestStatus.feedback,
+                latestStatus.Counter ?? latestStatus.CounterValue,
+                latestStatus.OdorSensVal ?? latestStatus.OdorLevel,
+                userSettings
+            );
 
-                status = classification.toiletStatus || "Clean";
+            status = classification.toiletStatus || "Clean";
+        } else {
+            const openAlertsForDevice = (alerts || []).filter(a => a.status === "OPEN" || a.status === "ASSIGNED");
+            if (openAlertsForDevice.length > 0) {
+                const hasCritical = openAlertsForDevice.some(a => {
+                    const cat = (a.alertCategory || a.alertType || a.toiletStatus || '').toLowerCase();
+                    return cat.includes('critical');
+                });
+                status = hasCritical ? "Critical" : "Need Attention";
             }
         }
 

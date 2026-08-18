@@ -46,47 +46,37 @@ const resolveDeviceStatuses = async (devices, adminId) => {
 
     return devices.map(device => {
         const devUids = [device.device_uid, device.deviceId, device._id ? device._id.toString() : null].filter(Boolean);
-        
-        // Find unresolved open alerts for this device
-        const activeAlertsForDev = (openAlerts || []).filter(a => {
-            const aDevId = String(a.device || '');
-            const aUid = String(a.device_uid || '').toLowerCase();
-            const aDeviceId = String(a.deviceId || '').toLowerCase();
-            return (device._id && String(device._id) === aDevId) ||
-                   devUids.some(u => u.toLowerCase() === aUid || u.toLowerCase() === aDeviceId);
-        });
+        let latestStatus = null;
+        for (const u of devUids) {
+            if (statusMap[u.toLowerCase()]) {
+                latestStatus = statusMap[u.toLowerCase()];
+                break;
+            }
+        }
 
         let toiletStatus = "Clean";
-        if (activeAlertsForDev.length > 0) {
-            const hasCritical = activeAlertsForDev.some(a => {
-                const cat = (a.alertCategory || a.alertType || a.toiletStatus || '').toLowerCase();
-                return cat.includes('critical');
-            });
-            if (hasCritical) {
-                toiletStatus = "Critical";
-            } else {
-                toiletStatus = "Need Attention";
-            }
+        if (latestStatus && (latestStatus.Counter !== undefined || latestStatus.OdorSensVal !== undefined || latestStatus.feedback !== undefined)) {
+            const classification = classifyTelemetry(
+                latestStatus.feedback,
+                latestStatus.Counter ?? latestStatus.CounterValue,
+                latestStatus.OdorSensVal ?? latestStatus.OdorLevel,
+                userSettings
+            );
+            toiletStatus = classification.toiletStatus || "Clean";
         } else {
-            let latestStatus = null;
-            for (const u of devUids) {
-                if (statusMap[u.toLowerCase()]) {
-                    latestStatus = statusMap[u.toLowerCase()];
-                    break;
-                }
-            }
-
-            if (latestStatus && latestStatus.timestamp) {
-                const latestDateStr = new Date(latestStatus.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-                if (latestDateStr === todayDateStr) {
-                    const classification = classifyTelemetry(
-                        latestStatus.feedback,
-                        latestStatus.Counter,
-                        latestStatus.OdorSensVal,
-                        userSettings
-                    );
-                    toiletStatus = classification.toiletStatus || "Clean";
-                }
+            const activeAlertsForDev = (openAlerts || []).filter(a => {
+                const aDevId = String(a.device || '');
+                const aUid = String(a.device_uid || '').toLowerCase();
+                const aDeviceId = String(a.deviceId || '').toLowerCase();
+                return (device._id && String(device._id) === aDevId) ||
+                       devUids.some(u => u.toLowerCase() === aUid || u.toLowerCase() === aDeviceId);
+            });
+            if (activeAlertsForDev.length > 0) {
+                const hasCritical = activeAlertsForDev.some(a => {
+                    const cat = (a.alertCategory || a.alertType || a.toiletStatus || '').toLowerCase();
+                    return cat.includes('critical');
+                });
+                toiletStatus = hasCritical ? "Critical" : "Need Attention";
             }
         }
 
