@@ -140,7 +140,21 @@ const startTask = async (req, res) => {
         const now = new Date();
         task.status = "IN_PROGRESS";
         task.startedAt = now;
-        task.progressPercent = 10;
+        task.progressPercent = 50;
+
+        if (task.alert) {
+            try {
+                const Alert = require("../models/Alert");
+                await Alert.findByIdAndUpdate(task.alert, {
+                    taskStatus: "IN_PROGRESS",
+                    taskProgressPercent: 50,
+                    startedAt: now,
+                    updatedAt: now
+                });
+            } catch (err) {
+                console.log("Error updating alert on startTask:", err.message);
+            }
+        }
         
         task.timeline.push({
             status: "IN_PROGRESS",
@@ -184,11 +198,11 @@ const uploadTaskPhotos = async (req, res) => {
             });
         }
 
-        // Validate Minimum 3 and Maximum 5 images rule
-        if (files.length < 3) {
+        // Validate Minimum 1 and Maximum 5 images rule
+        if (files.length < 1) {
             return res.status(400).json({
                 success: false,
-                message: `Minimum 3 cleaning photos are required. You provided ${files.length}.`
+                message: "Minimum 1 cleaning photo is required."
             });
         }
 
@@ -207,18 +221,46 @@ const uploadTaskPhotos = async (req, res) => {
 
         task.cleaningPhotos = photoRecords;
         task.photosUploadedAt = now;
+        task.submittedAt = now;
+        task.status = "SUBMITTED";
+        task.progressPercent = 90;
         task.beforeCleaningPhoto = photoRecords[0].url;
         task.afterCleaningPhoto = photoRecords[photoRecords.length - 1].url;
 
         task.timeline.push({
-            status: "PHOTOS_UPLOADED",
+            status: "SUBMITTED",
             timestamp: now,
             updatedBy: req.user.id,
-            notes: `Uploaded ${files.length} cleaning photos`
+            notes: `Uploaded ${files.length} cleaning photos and submitted task`
         });
 
         await task.save();
+
+        if (task.alert) {
+            try {
+                const Alert = require("../models/Alert");
+                const photoUrls = photoRecords.map(p => p.url);
+                await Alert.findByIdAndUpdate(task.alert, {
+                    status: "ASSIGNED",
+                    taskStatus: "SUBMITTED",
+                    taskProgressPercent: 90,
+                    taskCleaningPhotos: photoUrls,
+                    photosUploadedAt: now,
+                    submittedAt: now,
+                    updatedAt: now
+                });
+                if (global.io) {
+                    global.io.emit("new_alert", { alertId: task.alert, taskId: task._id, status: "SUBMITTED" });
+                }
+            } catch (err) {
+                console.log("Error updating alert on uploadTaskPhotos:", err.message);
+            }
+        }
+
         broadcastTaskUpdate(task);
+        if (global.io) {
+            global.io.emit("task_status_updated", { taskId: task._id, alertId: task.alert, status: "SUBMITTED", progressPercent: 90 });
+        }
 
         console.log(`📷 ${files.length} Photos uploaded for Task ${task._id} at ${now.toISOString()}`);
 

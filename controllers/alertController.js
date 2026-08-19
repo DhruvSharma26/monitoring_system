@@ -183,6 +183,16 @@ const getAlerts = async (req, res) => {
                 alertItem.staffId = taskStaff._id ? taskStaff._id.toString() : taskStaff.toString();
                 alertItem.assignedStaffName = taskStaff.name || alertItem.assignedStaffName || "";
                 alertItem.assignedStaffEmpId = taskStaff.empId || taskStaff.userId || alertItem.assignedStaffEmpId || "";
+
+                alertItem.taskId = task._id.toString();
+                alertItem.taskStatus = task.status || "ASSIGNED";
+                alertItem.taskProgressPercent = (task.status === "VERIFIED" || task.status === "RESOLVED") ? 100 : (task.status === "SUBMITTED" ? 90 : (task.status === "IN_PROGRESS" ? 50 : (task.progressPercent || 25)));
+                alertItem.taskCleaningPhotos = task.cleaningPhotos ? task.cleaningPhotos.map(p => typeof p === 'string' ? p : (p.url || p)) : [];
+                alertItem.startedAt = task.startedAt || alertItem.startedAt;
+                alertItem.photosUploadedAt = task.photosUploadedAt || alertItem.photosUploadedAt;
+                alertItem.submittedAt = task.submittedAt || alertItem.submittedAt;
+                alertItem.completedAt = task.completedAt || alertItem.completedAt;
+
                 if (alertItem.status === "OPEN" || alertItem.status === "UNASSIGNED") {
                     alertItem.status = "ASSIGNED";
                 }
