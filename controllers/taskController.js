@@ -747,7 +747,61 @@ const updateTaskProgress = async (req, res) => {
     }
 };
 
+
+const forceVerifyTask = async (req, res) => {
+    try {
+        const taskId = req.params.taskId || req.body.taskId;
+        const alertId = req.body.alertId;
+        const remarks = req.body.remarks || "Force verified by admin";
+
+        let task = taskId ? await Task.findById(taskId) : null;
+        if (!task && alertId) {
+            task = await Task.findOne({ alert: alertId });
+        }
+
+        const now = new Date();
+
+        if (task) {
+            task.status = "EXPIRED";
+            task.adminRemarks = remarks;
+            if (!Array.isArray(task.timeline)) task.timeline = [];
+            task.timeline.push({
+                status: "EXPIRED",
+                timestamp: now,
+                updatedBy: req.user ? req.user.id : null,
+                notes: "Force verified by admin - task expired for staff"
+            });
+            await task.save();
+
+            if (task.alert) {
+                const Alert = require("../models/Alert");
+                await Alert.findByIdAndUpdate(task.alert, { status: "VERIFIED", resolvedAt: now });
+            }
+
+            if (global.io) {
+                global.io.emit("task_status_updated", { taskId: task._id, status: "EXPIRED" });
+                global.io.emit("new_alert", { alertId: task.alert, status: "VERIFIED" });
+            }
+        } else if (alertId) {
+            const Alert = require("../models/Alert");
+            await Alert.findByIdAndUpdate(alertId, { status: "VERIFIED", resolvedAt: now });
+            if (global.io) {
+                global.io.emit("new_alert", { alertId: alertId, status: "VERIFIED" });
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Task force verified by admin."
+        });
+    } catch (error) {
+        console.error("Error force verifying task:", error);
+        return res.status(500).json({ success: false, message: "Server error force verifying task" });
+    }
+};
+
 module.exports = {
+    forceVerifyTask,
     assignTask,
     startTask,
     uploadTaskPhotos,

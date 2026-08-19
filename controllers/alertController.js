@@ -781,7 +781,67 @@ const deleteAlert = async (req, res) => {
     }
 };
 
+
+const forceVerifyAlert = async (req, res) => {
+    try {
+        const alertId = req.params.alertId || req.body.alertId;
+        const taskId = req.body.taskId;
+        const remarks = req.body.remarks || "Force verified by admin";
+
+        const alert = await Alert.findById(alertId);
+        if (!alert) {
+            return res.status(404).json({ success: false, message: "Alert not found" });
+        }
+
+        const now = new Date();
+        alert.status = "VERIFIED";
+        alert.resolvedAt = now;
+        await alert.save();
+
+        let task = null;
+        if (taskId) {
+            task = await Task.findById(taskId);
+        }
+        if (!task && alert._id) {
+            task = await Task.findOne({ alert: alert._id });
+        }
+
+        if (task) {
+            task.status = "EXPIRED";
+            task.adminRemarks = remarks;
+            if (!Array.isArray(task.timeline)) task.timeline = [];
+            task.timeline.push({
+                status: "EXPIRED",
+                timestamp: now,
+                updatedBy: req.user ? req.user.id : null,
+                notes: "Force verified by admin - task expired for staff"
+            });
+            await task.save();
+
+            if (global.io) {
+                global.io.emit("task_status_updated", { taskId: task._id, status: "EXPIRED" });
+            }
+        }
+
+        if (global.io) {
+            global.io.emit("new_alert", { alertId: alert._id, status: "VERIFIED" });
+            global.io.emit("new_notification", { type: "alert_verified", alertId: alert._id });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Alert force verified by admin. Task marked EXPIRED for staff.",
+            alert,
+            task
+        });
+    } catch (error) {
+        console.error("Error force verifying alert:", error);
+        return res.status(500).json({ success: false, message: "Server error force verifying alert" });
+    }
+};
+
 module.exports = {
+    forceVerifyAlert,
 
     getAlerts,
 

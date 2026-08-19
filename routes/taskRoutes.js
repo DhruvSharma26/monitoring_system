@@ -12,6 +12,7 @@ const {
     uploadTaskPhotos,
     submitTask,
     verifyTask,
+    forceVerifyTask,
     rejectTask,
     reassignTask,
     completeTask,
@@ -58,6 +59,8 @@ router.post("/submit", submitTask);
 router.post("/:taskId/submit", submitTask);
 
 // Admin Verify Task
+router.post("/force-verify", forceVerifyTask);
+router.post("/:taskId/force-verify", forceVerifyTask);
 router.post("/verify", verifyTask);
 router.post("/:taskId/verify", verifyTask);
 

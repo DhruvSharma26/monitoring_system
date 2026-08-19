@@ -12,6 +12,7 @@ const {
     getAlertDetails,
 
     resolveAlert,
+    forceVerifyAlert,
     
     assignAlert,
 
