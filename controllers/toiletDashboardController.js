@@ -42,12 +42,12 @@ const getToilets = async (req, res) => {
 
         const Settings = require("../models/Settings");
         const Alert = require("../models/Alert");
-        const [statuses, openAlerts, completedTasks, allActiveAssignments, settings] = await Promise.all([
+        const [statuses, allAlerts, completedTasks, allActiveAssignments, settings] = await Promise.all([
             LatestDeviceStatus.find().lean(),
-            Alert.find({ status: { $in: ["OPEN", "ASSIGNED"] } }).lean(),
-            Task.find({ status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] } })
+            Alert.find().lean(),
+            Task.find({ status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED", "SUBMITTED"] } })
                 .populate("staff", "name empId userId")
-                .sort({ updatedAt: -1 })
+                .sort({ completedAt: -1, verifiedAt: -1, updatedAt: -1 })
                 .lean(),
             Assignment.find({ status: "ACTIVE" })
                 .populate("staff", "name empId userId")
@@ -56,6 +56,12 @@ const getToilets = async (req, res) => {
         ]);
 
         const userSettings = settings || (await Settings.findOne().lean());
+        const openAlerts = (allAlerts || []).filter(a => a.status === "OPEN" || a.status === "ASSIGNED");
+
+        const alertMap = {};
+        (allAlerts || []).forEach(a => {
+            alertMap[String(a._id)] = a;
+        });
 
         const statusMap = {};
         statuses.forEach(item => {
@@ -66,7 +72,12 @@ const getToilets = async (req, res) => {
         const toilets = [];
 
         for (const device of devices) {
-            const devUids = [device.device_uid, device.deviceId, device._id ? device._id.toString() : null].filter(Boolean);
+            const devUids = [
+                device.device_uid,
+                device.deviceId,
+                device._id ? device._id.toString() : null
+            ].filter(Boolean);
+
             let latestStatus = {};
             for (const u of devUids) {
                 if (statusMap[u.toLowerCase()]) {
@@ -97,7 +108,7 @@ const getToilets = async (req, res) => {
             const todayDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
             const isToday = Boolean(latestDateStr && latestDateStr === todayDateStr);
 
-            // 2. Status Calculation: Driven by latest MQTT telemetry (if normal, keep clean)
+            // 2. Status Calculation: Driven by latest MQTT telemetry
             let toiletStatus = "Clean";
             if (latestStatus && (latestStatus.Counter !== undefined || latestStatus.OdorSensVal !== undefined || latestStatus.feedback !== undefined)) {
                 const { classifyTelemetry } = require("../services/alertClassifier");
@@ -145,36 +156,53 @@ const getToilets = async (req, res) => {
             // 3. Compute Rolling Last 24-Hour Metrics
             const metrics24h = await ratingService.get24HourMetrics(devUids);
 
-            // 4. Resolve Last Cleaned Info & Last Cleaned By Staff
-            const deviceTask = completedTasks.find(t => String(t.device) === String(device._id));
+            // 4. Resolve Last Cleaned Info & Last Cleaned By Staff with exhaustive fallback
+            const deviceTask = completedTasks.find(t => {
+                if (t.device && devUids.some(u => String(t.device).toLowerCase() === u.toLowerCase())) return true;
+                if (t.deviceId && devUids.some(u => String(t.deviceId).toLowerCase() === u.toLowerCase())) return true;
+                if (t.device_uid && devUids.some(u => String(t.device_uid).toLowerCase() === u.toLowerCase())) return true;
+                if (t.alert && alertMap[String(t.alert)]) {
+                    const al = alertMap[String(t.alert)];
+                    if (al.device && devUids.some(u => String(al.device).toLowerCase() === u.toLowerCase())) return true;
+                    if (al.deviceId && devUids.some(u => String(al.deviceId).toLowerCase() === u.toLowerCase())) return true;
+                    if (al.device_uid && devUids.some(u => String(al.device_uid).toLowerCase() === u.toLowerCase())) return true;
+                }
+                return false;
+            });
+
             let lastCleanedAtFormatted = "Not cleaned yet";
+            let lastCleanedDate = null;
             let lastCleanedByStaffName = "N/A";
             let lastCleanedByStaffUserId = "";
             let lastCleanedByStaffEmpId = "";
 
             if (deviceTask) {
-                const cleanedDate = deviceTask.verifiedAt || deviceTask.completedAt || deviceTask.submittedAt || deviceTask.updatedAt;
+                const cleanedDate = deviceTask.completedAt || deviceTask.verifiedAt || deviceTask.submittedAt || deviceTask.updatedAt;
                 if (cleanedDate) {
-                    lastCleanedAtFormatted = new Date(cleanedDate).toLocaleString("en-US", {
+                    lastCleanedDate = new Date(cleanedDate).toISOString();
+                    lastCleanedAtFormatted = new Date(cleanedDate).toLocaleString("en-IN", {
                         day: "2-digit",
                         month: "short",
                         year: "numeric",
                         hour: "2-digit",
-                        minute: "2-digit"
+                        minute: "2-digit",
+                        timeZone: "Asia/Kolkata"
                     });
                 }
                 if (deviceTask.staff) {
-                    lastCleanedByStaffName = deviceTask.staff.name || "N/A";
+                    lastCleanedByStaffName = deviceTask.staff.name || "Staff Member";
                     lastCleanedByStaffUserId = deviceTask.staff.userId || "";
                     lastCleanedByStaffEmpId = deviceTask.staff.empId || "";
                 }
             } else if (latestStatus && latestStatus.timestamp) {
-                lastCleanedAtFormatted = new Date(latestStatus.timestamp).toLocaleString("en-US", {
+                lastCleanedDate = new Date(latestStatus.timestamp).toISOString();
+                lastCleanedAtFormatted = new Date(latestStatus.timestamp).toLocaleString("en-IN", {
                     day: "2-digit",
                     month: "short",
                     year: "numeric",
                     hour: "2-digit",
-                    minute: "2-digit"
+                    minute: "2-digit",
+                    timeZone: "Asia/Kolkata"
                 });
             }
 
@@ -200,7 +228,11 @@ const getToilets = async (req, res) => {
                 usageToday: metrics24h.totalUsage,
 
                 // Cleaning & Staff Info
+                lastCleaned: lastCleanedAtFormatted,
                 lastCleanedAt: lastCleanedAtFormatted,
+                lastCleanedDate: lastCleanedDate,
+                lastCleanedTimestamp: lastCleanedDate,
+                lastCleanedByStaff: lastCleanedAtFormatted,
                 lastCleanedByStaffName: lastCleanedByStaffName,
                 lastCleanedByStaffUserId: lastCleanedByStaffUserId,
                 lastCleanedByStaffEmpId: lastCleanedByStaffEmpId,

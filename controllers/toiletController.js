@@ -1,70 +1,90 @@
 const mongoose = require("mongoose");
 const Device = require("../models/Device");
-const SensorData = require("../models/SensorData");
 const LatestDeviceStatus = require("../models/LatestDeviceStatus");
+const SensorData = require("../models/SensorData");
+const Task = require("../models/Task");
 const User = require("../models/User");
 const Alert = require("../models/Alert");
-const Task = require("../models/Task");
+const Settings = require("../models/Settings");
 const ratingService = require("../services/ratingService");
 
 const getToiletDetails = async (req, res) => {
     try {
         const { deviceId } = req.params;
+
         const isObjectId = mongoose.Types.ObjectId.isValid(deviceId);
         const device = await Device.findOne({
             $or: isObjectId
                 ? [{ _id: deviceId }, { deviceId }, { device_uid: deviceId }]
                 : [{ deviceId }, { device_uid: deviceId }]
-        }).lean();
+        }).populate("assignedStaff", "name empId userId email mobile_number designation");
 
         if (!device) {
             return res.status(404).json({ success: false, message: "Device not found" });
         }
 
-        const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-        const now = new Date();
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(now.getDate() - 6);
-        sevenDaysAgo.setHours(0, 0, 0, 0);
+        const devUids = [
+            device.device_uid,
+            device.deviceId,
+            device._id ? device._id.toString() : null
+        ].filter(Boolean);
 
-        const targetUids = [device.device_uid, device.deviceId, device._id ? device._id.toString() : null].filter(Boolean);
-        const regexUids = targetUids.map(u => new RegExp(`^${u.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'));
+        const regexUids = devUids.map(u => new RegExp(`^${u}$`, "i"));
 
-        const Settings = require("../models/Settings");
-        const [latestStatus, alerts, tasks, staff, last7DaysSensorLogs, lastCompletedTask, completedTasks7Days, settings] = await Promise.all([
-            LatestDeviceStatus.findOne({
-                $or: [{ device_uid: { $in: regexUids } }, { deviceId: { $in: regexUids } }]
-            }).lean(),
-            Alert.find({
-                $or: [{ device_uid: { $in: regexUids } }, { deviceId: { $in: regexUids } }]
-            }).sort({ createdAt: -1 }).limit(10).lean(),
-            Task.find({
-                $or: [{ device: device._id }, { device_uid: { $in: regexUids } }, { deviceId: { $in: regexUids } }]
-            }).populate("staff").sort({ createdAt: -1 }),
-            User.findOne({ assignedDevice: device._id }).lean(),
+        const tenDaysAgo = new Date();
+        tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+
+        // Fetch all relevant data concurrently
+        const [
+            allDeviceStatuses,
+            sensorLogs,
+            alertDocs,
+            allCompletedTasks,
+            assignedUser,
+            settings
+        ] = await Promise.all([
+            LatestDeviceStatus.find().lean(),
             SensorData.find({
-                $or: [{ device_uid: { $in: regexUids } }, { deviceId: { $in: regexUids } }],
-                timestamp: { $gte: sevenDaysAgo }
-            }).sort({ timestamp: 1 }).lean(),
-            Task.findOne({
-                $or: [{ device: device._id }, { device_uid: { $in: regexUids } }, { deviceId: { $in: regexUids } }],
-                status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] }
-            }).populate("staff", "name empId userId").sort({ updatedAt: -1 }).lean(),
+                $or: [
+                    { device_uid: { $in: regexUids } },
+                    { deviceId: { $in: regexUids } }
+                ]
+            }).sort({ timestamp: -1, createdAt: -1 }).lean(),
+            Alert.find({
+                $or: [
+                    { device: device._id },
+                    { device_uid: { $in: regexUids } },
+                    { deviceId: { $in: regexUids } }
+                ]
+            }).sort({ createdAt: -1 }).lean(),
             Task.find({
-                $or: [{ device: device._id }, { device_uid: { $in: regexUids } }, { deviceId: { $in: regexUids } }],
-                status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED"] },
-                updatedAt: { $gte: sevenDaysAgo }
-            }).lean(),
+                $or: [
+                    { device: device._id },
+                    { device_uid: { $in: regexUids } },
+                    { deviceId: { $in: regexUids } }
+                ],
+                status: { $in: ["COMPLETED", "VERIFIED", "RESOLVED", "SUBMITTED"] }
+            }).populate("staff", "name empId userId email mobile_number").sort({ completedAt: -1, verifiedAt: -1, updatedAt: -1 }).lean(),
+            User.findOne({ assignedDevice: device._id }).lean(),
             Settings.findOne({ adminId: req.user.id }).lean()
         ]);
 
-        const userSettings = settings || (await Settings.findOne({ adminId: req.user.id }).lean()) || (await Settings.findOne().lean());
+        const userSettings = settings || (await Settings.findOne().lean()) || { counterThreshold: 100, odorThreshold: 200 };
         const odorThreshold = Number(userSettings?.odorThreshold) || 200;
         const counterThreshold = Number(userSettings?.counterThreshold) || 100;
-        const warningOdorThreshold = Math.round(odorThreshold * 0.75);
-        const warningCounterThreshold = Math.round(counterThreshold * 0.75);
 
-        // 2. Status Calculation: Driven by latest MQTT telemetry
+        // Latest MQTT status
+        let latestStatus = {};
+        for (const item of allDeviceStatuses) {
+            const matchUid = (item.device_uid && devUids.some(u => u.toLowerCase() === item.device_uid.toLowerCase())) ||
+                             (item.deviceId && devUids.some(u => u.toLowerCase() === item.deviceId.toLowerCase()));
+            if (matchUid) {
+                latestStatus = item;
+                break;
+            }
+        }
+
+        // 1. Status Calculation
         let status = "Clean";
         if (latestStatus && (latestStatus.Counter !== undefined || latestStatus.OdorSensVal !== undefined || latestStatus.feedback !== undefined)) {
             const { classifyTelemetry } = require("../services/alertClassifier");
@@ -74,33 +94,52 @@ const getToiletDetails = async (req, res) => {
                 latestStatus.OdorSensVal ?? latestStatus.OdorLevel,
                 userSettings
             );
-
             status = classification.toiletStatus || "Clean";
         } else {
-            const openAlertsForDevice = (alerts || []).filter(a => a.status === "OPEN" || a.status === "ASSIGNED");
+            const openAlertsForDevice = (alertDocs || []).filter(a => a.status === "OPEN" || a.status === "ASSIGNED");
             if (openAlertsForDevice.length > 0) {
                 const hasCritical = openAlertsForDevice.some(a => {
-                    const cat = (a.alertCategory || a.alertType || a.toiletStatus || '').toLowerCase();
-                    return cat.includes('critical');
+                    const cat = (a.alertCategory || a.alertType || a.toiletStatus || "").toLowerCase();
+                    return cat.includes("critical");
                 });
                 status = hasCritical ? "Critical" : "Need Attention";
             }
         }
 
+        // 2. Resolve Last Cleaned Task & Staff
+        const alertMap = {};
+        (alertDocs || []).forEach(a => { alertMap[String(a._id)] = a; });
+
+        const lastCompletedTask = allCompletedTasks.find(t => {
+            if (t.device && devUids.some(u => String(t.device).toLowerCase() === u.toLowerCase())) return true;
+            if (t.deviceId && devUids.some(u => String(t.deviceId).toLowerCase() === u.toLowerCase())) return true;
+            if (t.device_uid && devUids.some(u => String(t.device_uid).toLowerCase() === u.toLowerCase())) return true;
+            if (t.alert && alertMap[String(t.alert)]) {
+                const al = alertMap[String(t.alert)];
+                if (al.device && devUids.some(u => String(al.device).toLowerCase() === u.toLowerCase())) return true;
+                if (al.deviceId && devUids.some(u => String(al.deviceId).toLowerCase() === u.toLowerCase())) return true;
+                if (al.device_uid && devUids.some(u => String(al.device_uid).toLowerCase() === u.toLowerCase())) return true;
+            }
+            return false;
+        });
+
         let lastCleanedByStaff = "Not yet cleaned today";
+        let lastCleanedDate = null;
         let lastCleanedByStaffName = "";
         let lastCleanedByStaffUserId = "";
         let lastCleanedByStaffEmpId = "";
 
         if (lastCompletedTask) {
-            const cleanedDate = lastCompletedTask.verifiedAt || lastCompletedTask.completedAt || lastCompletedTask.submittedAt || lastCompletedTask.updatedAt;
+            const cleanedDate = lastCompletedTask.completedAt || lastCompletedTask.verifiedAt || lastCompletedTask.submittedAt || lastCompletedTask.updatedAt;
             if (cleanedDate) {
-                lastCleanedByStaff = new Date(cleanedDate).toLocaleString("en-US", {
+                lastCleanedDate = new Date(cleanedDate).toISOString();
+                lastCleanedByStaff = new Date(cleanedDate).toLocaleString("en-IN", {
                     day: "2-digit",
                     month: "short",
                     year: "numeric",
                     hour: "2-digit",
-                    minute: "2-digit"
+                    minute: "2-digit",
+                    timeZone: "Asia/Kolkata"
                 });
             }
             if (lastCompletedTask.staff) {
@@ -109,140 +148,140 @@ const getToiletDetails = async (req, res) => {
                 lastCleanedByStaffEmpId = lastCompletedTask.staff.empId || "";
             }
         } else if (latestStatus && latestStatus.timestamp) {
-            lastCleanedByStaff = new Date(latestStatus.timestamp).toLocaleString("en-US", {
+            lastCleanedDate = new Date(latestStatus.timestamp).toISOString();
+            lastCleanedByStaff = new Date(latestStatus.timestamp).toLocaleString("en-IN", {
                 day: "2-digit",
                 month: "short",
                 year: "numeric",
                 hour: "2-digit",
-                minute: "2-digit"
+                minute: "2-digit",
+                timeZone: "Asia/Kolkata"
             });
         }
 
-        const feedbackToRating = (fb) => {
-            if (fb === 1 || fb === 2) return 5.0;
-            if (fb === 3) return 2.5;
-            if (fb === 4) return 1.0;
-            return 5.0;
-        };
+        // 3. Build Telemetry Fusion for 7-Day History
+        const allTelemetry = [];
+        (sensorLogs || []).forEach(s => {
+            const dt = new Date(s.timestamp || s.createdAt);
+            const istDate = dt.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+            allTelemetry.push({
+                source: "sensor",
+                istDate,
+                timestamp: dt,
+                Counter: Number(s.Counter ?? s.CounterValue ?? 0),
+                Odor: Number(s.OdorSensVal ?? s.OdorLevel ?? 0),
+                feedback: s.feedback
+            });
+        });
 
+        (alertDocs || []).forEach(a => {
+            const dt = new Date(a.createdAt || a.updatedAt);
+            const istDate = dt.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+            allTelemetry.push({
+                source: "alert",
+                istDate,
+                timestamp: dt,
+                Counter: Number(a.Counter ?? a.counterValue ?? a.CounterValue ?? 0),
+                Odor: Number(a.OdorSensVal ?? a.odorValue ?? a.OdorLevel ?? 0),
+                feedback: a.feedback
+            });
+        });
+
+        const now = new Date();
         const counterHistory = [];
         const odorHistory = [];
         const ratingHistory = [];
         const cleaningHistory = [];
 
         for (let i = 6; i >= 0; i--) {
-            const dayStart = new Date();
-            dayStart.setDate(now.getDate() - i);
-            dayStart.setHours(0, 0, 0, 0);
+            const targetDate = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+            const targetDateStr = targetDate.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+            const dayLabel = targetDate.toLocaleDateString("en-US", { weekday: "short", timeZone: "Asia/Kolkata" });
 
-            const dayEnd = new Date();
-            dayEnd.setDate(now.getDate() - i);
-            dayEnd.setHours(23, 59, 59, 999);
+            // Telemetry for this IST day
+            const dayTelemetries = allTelemetry.filter(t => t.istDate === targetDateStr);
 
-            const targetDateStr = `${dayStart.getFullYear()}-${String(dayStart.getMonth() + 1).padStart(2, '0')}-${String(dayStart.getDate()).padStart(2, '0')}`;
-            const dateStr = targetDateStr;
-            const dayLabel = dayNames[dayStart.getDay()];
-
-            const dayLogs = last7DaysSensorLogs.filter(log => {
-                if (log.date) return log.date === targetDateStr;
-                const logTime = new Date(log.timestamp || log.createdAt).getTime();
-                return logTime >= dayStart.getTime() && logTime <= dayEnd.getTime();
+            // Cleanings for this IST day
+            const dayCleanings = (allCompletedTasks || []).filter(t => {
+                const cDate = new Date(t.completedAt || t.verifiedAt || t.updatedAt || t.createdAt);
+                const cIstDate = cDate.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+                return cIstDate === targetDateStr;
             });
-
-            // Cleaning count per day from completed tasks
-            const dayCleaningTasks = (completedTasks7Days || []).filter(task => {
-                const taskDate = new Date(task.updatedAt || task.completedAt || task.verifiedAt || task.createdAt);
-                const taskTime = taskDate.getTime();
-                return taskTime >= dayStart.getTime() && taskTime <= dayEnd.getTime();
-            });
-            const dayCleaningCount = dayCleaningTasks.length;
 
             let dayCounter = 0;
             let dayOdor = 0;
             let dayRating = 5.0;
 
-            if (dayLogs.length > 0) {
-                // Max / Peak counter for the day
-                for (const l of dayLogs) {
-                    const c = Number(l.Counter ?? l.CounterValue ?? l.counterValue ?? l.counter) || 0;
-                    if (c > dayCounter) dayCounter = c;
-                }
-                if (dayCounter === 0 && dayLogs.length > 0) {
-                    dayCounter = dayLogs.length;
+            if (dayTelemetries.length > 0) {
+                // Peak visitor counter
+                for (const t of dayTelemetries) {
+                    if (t.Counter > dayCounter) dayCounter = t.Counter;
                 }
 
-                // Average odor
-                let sumOdor = 0;
-                for (const l of dayLogs) {
-                    sumOdor += Number(l.OdorSensVal ?? l.OdorLevel ?? l.odorValue ?? l.odor) || 0;
-                }
-                dayOdor = Math.round(sumOdor / dayLogs.length);
-
-                // Rating calculation using ratingService
-                const explicitLogs = dayLogs.filter(l => l.feedback !== undefined && l.feedback !== null && Number(l.feedback) > 0);
-                if (explicitLogs.length > 0) {
-                    const sumRating = explicitLogs.reduce((acc, l) => acc + ratingService.calculateParticularRating(l.Counter ?? l.CounterValue, l.OdorSensVal ?? l.OdorLevel, l.feedback), 0);
-                    dayRating = parseFloat((sumRating / explicitLogs.length).toFixed(1));
+                // Average Odor (prioritize positive readings if present)
+                const odorPositives = dayTelemetries.map(t => t.Odor).filter(o => o > 0);
+                if (odorPositives.length > 0) {
+                    dayOdor = Math.round(odorPositives.reduce((sum, v) => sum + v, 0) / odorPositives.length);
                 } else {
-                    const sumRating = dayLogs.reduce((acc, l) => acc + ratingService.calculateParticularRating(l.Counter ?? l.CounterValue, l.OdorSensVal ?? l.OdorLevel, l.feedback || 4), 0);
-                    dayRating = parseFloat((sumRating / dayLogs.length).toFixed(1));
+                    const sumAll = dayTelemetries.reduce((sum, t) => sum + t.Odor, 0);
+                    dayOdor = Math.round(sumAll / dayTelemetries.length);
+                }
+
+                // Rating Calculation
+                const explicitFbs = dayTelemetries.filter(t => t.feedback !== undefined && t.feedback !== null && Number(t.feedback) > 0);
+                if (explicitFbs.length > 0) {
+                    const sumStars = explicitFbs.reduce((acc, l) => {
+                        const fb = Number(l.feedback);
+                        const stars = (fb === 1 || fb === 2) ? 5.0 : (fb === 3 ? 3.0 : 1.0);
+                        return acc + stars;
+                    }, 0);
+                    dayRating = parseFloat((sumStars / explicitFbs.length).toFixed(1));
+                } else {
+                    dayRating = 5.0;
                 }
             } else if (i === 0 && latestStatus) {
-                // Fallback for today if live telemetry exists
+                // Fallback for today from live telemetry
                 const curC = Number(latestStatus.Counter ?? latestStatus.CounterValue) || 0;
                 const curO = Number(latestStatus.OdorSensVal ?? latestStatus.OdorLevel) || 0;
                 dayCounter = curC;
                 dayOdor = curO;
-                const rawR = ratingService.calculateParticularRating(curC, curO, latestStatus.feedback || 4);
-                dayRating = parseFloat((Number(rawR) || 5.0).toFixed(1));
+                const fb = Number(latestStatus.feedback) || 1;
+                dayRating = (fb === 1 || fb === 2) ? 5.0 : (fb === 3 ? 3.0 : 1.0);
             } else {
                 dayCounter = 0;
                 dayOdor = 0;
                 dayRating = 0.0;
             }
 
-            counterHistory.push({ day: dayLabel, date: dateStr, value: dayCounter });
-            odorHistory.push({ day: dayLabel, date: dateStr, value: dayOdor });
-            ratingHistory.push({ day: dayLabel, date: dateStr, value: dayRating });
-            cleaningHistory.push({ day: dayLabel, date: dateStr, value: dayCleaningCount });
+            counterHistory.push({ day: dayLabel, date: targetDateStr, value: dayCounter });
+            odorHistory.push({ day: dayLabel, date: targetDateStr, value: dayOdor });
+            ratingHistory.push({ day: dayLabel, date: targetDateStr, value: dayRating });
+            cleaningHistory.push({ day: dayLabel, date: targetDateStr, value: dayCleanings.length });
         }
 
-        // Calculate 24-hour average rating using ratingService
-        const metrics24h = await ratingService.get24HourMetrics(targetUids);
-        let averageRating = metrics24h.averageRating;
-        if (averageRating === null) {
-            if (last7DaysSensorLogs.length > 0) {
-                const logsWithFeedback = last7DaysSensorLogs.filter(l => l.feedback !== undefined && l.feedback !== null && Number(l.feedback) > 0);
-                if (logsWithFeedback.length > 0) {
-                    const sum = logsWithFeedback.reduce((acc, l) => acc + ratingService.calculateParticularRating(l.Counter, l.OdorSensVal, l.feedback), 0);
-                    averageRating = parseFloat((sum / logsWithFeedback.length).toFixed(1));
-                } else {
-                    averageRating = 5.0;
-                }
-            } else {
-                averageRating = 5.0;
-            }
-        }
+        // 4. Calculate 24-hour average rating using ratingService
+        const metrics24h = await ratingService.get24HourMetrics(devUids);
+        let averageRating = metrics24h.averageRating !== null ? metrics24h.averageRating : 5.0;
 
-        const latestDateStr = latestStatus && latestStatus.timestamp ? new Date(latestStatus.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : null;
-        const todayDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+        const latestDateStr = latestStatus && latestStatus.timestamp ? new Date(latestStatus.timestamp).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }) : null;
+        const todayDateStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
         const isLatestToday = Boolean(latestDateStr && latestDateStr === todayDateStr);
 
-        let currentCounter = isLatestToday ? (Number(latestStatus?.Counter) || 0) : 0;
-        let currentOdor = isLatestToday ? (Number(latestStatus?.OdorSensVal) || 0) : 0;
+        let currentCounter = isLatestToday ? (Number(latestStatus?.Counter ?? latestStatus?.CounterValue) || 0) : 0;
+        let currentOdor = isLatestToday ? (Number(latestStatus?.OdorSensVal ?? latestStatus?.OdorLevel) || 0) : 0;
         let currentFeedback = isLatestToday ? (latestStatus?.feedback || 1) : 1;
 
         // Filter sensor logs strictly for today's date in IST
-        const todaySensorLogs = last7DaysSensorLogs.filter(l => {
-            const lDateStr = l.timestamp ? new Date(l.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : null;
+        const todaySensorLogs = (sensorLogs || []).filter(l => {
+            const lDateStr = l.timestamp ? new Date(l.timestamp).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }) : null;
             return lDateStr && lDateStr === todayDateStr;
         });
 
         if (todaySensorLogs.length > 0) {
-            const maxTodayCounter = Math.max(...todaySensorLogs.map(l => Number(l.Counter) || 0));
+            const maxTodayCounter = Math.max(...todaySensorLogs.map(l => Number(l.Counter ?? l.CounterValue) || 0));
             if (maxTodayCounter > currentCounter) currentCounter = maxTodayCounter;
 
-            const maxTodayOdor = Math.max(...todaySensorLogs.map(l => Number(l.OdorSensVal) || 0));
+            const maxTodayOdor = Math.max(...todaySensorLogs.map(l => Number(l.OdorSensVal ?? l.OdorLevel) || 0));
             if (maxTodayOdor > currentOdor) currentOdor = maxTodayOdor;
         }
 
@@ -257,6 +296,8 @@ const getToiletDetails = async (req, res) => {
             timestamp: isLatestToday ? latestStatus.timestamp : new Date()
         };
 
+        const resolvedStaff = device.assignedStaff || assignedUser || null;
+
         res.status(200).json({
             success: true,
             device,
@@ -268,10 +309,22 @@ const getToiletDetails = async (req, res) => {
             currentCounterValue: currentCounter,
             currentOdor: currentOdor,
             currentOdorLevel: currentOdor,
+
+            // Last Cleaned information
+            lastCleaned: lastCleanedByStaff,
+            lastCleanedAt: lastCleanedByStaff,
+            lastCleanedDate: lastCleanedDate,
+            lastCleanedTimestamp: lastCleanedDate,
             lastCleanedByStaff,
             lastCleanedByStaffName,
             lastCleanedByStaffUserId,
             lastCleanedByStaffEmpId,
+
+            // Staff assignment
+            assignedStaffName: resolvedStaff?.name || "",
+            assignedStaffUserId: resolvedStaff?.userId || "",
+            assignedStaffEmpId: resolvedStaff?.empId || "",
+
             weeklyAnalysis: {
                 counterHistory,
                 odorHistory,
@@ -282,10 +335,10 @@ const getToiletDetails = async (req, res) => {
             odorHistory,
             ratingHistory,
             cleaningHistory,
-            staff,
-            alerts,
-            tasks,
-            sensorHistory: last7DaysSensorLogs
+            staff: resolvedStaff,
+            alerts: alertDocs,
+            tasks: allCompletedTasks,
+            sensorHistory: sensorLogs
         });
     } catch (error) {
         console.error("Error in getToiletDetails:", error);
@@ -353,19 +406,17 @@ const postToiletTelemetry = async (req, res) => {
         const dd = String(now.getDate()).padStart(2, '0');
         const dateStr = `${yyyy}-${mm}-${dd}`;
 
-        const cVal = CounterValue ?? Counter ?? counterVal ?? counter;
-        const oVal = OdorLevel ?? OdorSensVal ?? odorVal ?? odor;
-
         const sensorPayload = {
             device_uid: device.device_uid,
             deviceId: device.deviceId,
+            device: device._id,
+            Counter: Number(Counter) || 0,
+            CounterValue: Number(Counter) || 0,
+            OdorSensVal: Number(OdorSensVal) || 0,
+            OdorLevel: Number(OdorSensVal) || 0,
+            feedback: Number(feedback) || 0,
             timestamp: now,
-            date: dateStr,
-            CounterValue: cVal !== undefined ? Number(cVal) : 0,
-            Counter: cVal !== undefined ? Number(cVal) : 0,
-            OdorLevel: oVal !== undefined ? Number(oVal) : 0,
-            OdorSensVal: oVal !== undefined ? Number(oVal) : 0,
-            feedback: feedback !== undefined ? Number(feedback) : 1
+            date: dateStr
         };
 
         await SensorData.create(sensorPayload);
@@ -415,7 +466,6 @@ const postToiletTelemetry = async (req, res) => {
 
             const alertType = classification.alertType;
 
-            // Dispatch targeted notifications (DB, FCM Push, Sockets) ONLY to admin who registered device & assigned staff
             await notificationService.handleMqttAlertNotification(sensorPayload, alertType, alertDoc);
 
             if (global.io) {
