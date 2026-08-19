@@ -198,9 +198,9 @@ const getAlerts = async (req, res) => {
                 alertItem.taskId = task._id;
                 alertItem.taskStatus = task.status;
                 alertItem.adminRemarks = task.adminRemarks || alertItem.adminRemarks || "";
-                alertItem.taskProgressPercent = (task.status === "VERIFIED" || task.status === "COMPLETED" || task.status === "RESOLVED") ? 100 : (task.progressPercent || 0);
+                alertItem.taskProgressPercent = (task.status === "VERIFIED" || task.status === "RESOLVED") ? 100 : (task.progressPercent || 0);
 
-                if (task.status === "VERIFIED" || task.status === "COMPLETED" || task.status === "RESOLVED") {
+                if (task.status === "VERIFIED" || task.status === "RESOLVED") {
                     alertItem.status = "VERIFIED";
                 } else if (task.status === "REJECTED") {
                     alertItem.status = "REJECTED";
