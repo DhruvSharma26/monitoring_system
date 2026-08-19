@@ -461,7 +461,8 @@ async function sendTaskReassignedNotification(taskDoc, oldStaffUser, newStaffUse
         // 2. Notify NEW Staff Member (if valid user object)
         if (newStaffUser && newStaffUser._id) {
             const newTitle = "📋 Task Reassigned to You";
-            const newMessage = `A task for device ${deviceUid} (${locationText}) has been reassigned to you.`;
+            const notesSuffix = (taskDoc && (taskDoc.notes || taskDoc.adminRemarks)) ? ` Reason/Notes: ${taskDoc.notes || taskDoc.adminRemarks}` : "";
+            const newMessage = `A cleaning task for device ${deviceUid} (${locationText}) has been reassigned to you.${notesSuffix}`;
 
             // Save DB Notification
             const dbNotifNew = await Notification.create({

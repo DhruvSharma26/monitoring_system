@@ -589,8 +589,8 @@ const reassignTask = async (req, res) => {
             const notificationService = require("../services/notificationService");
             if (prevStaffId && oldStaffUser && !isSameStaff) {
                 await notificationService.sendTaskReassignedNotification(task, oldStaffUser, staff, device);
-            } else if (!prevStaffId && !isSameStaff) {
-                await notificationService.sendTaskAssignedNotification(task, staff, req.user, device);
+            } else {
+                await notificationService.sendTaskReassignedNotification(task, null, staff, device);
             }
         } catch (err) {
             console.log("Error sending task reassignment notification:", err.message);
