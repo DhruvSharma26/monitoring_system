@@ -442,12 +442,19 @@ const rejectTask = async (req, res) => {
 
         if (task.alert) {
             const Alert = require("../models/Alert");
-            await Alert.findByIdAndUpdate(task.alert, { status: "REJECTED" });
+            await Alert.findByIdAndUpdate(task.alert, {
+                status: "REJECTED",
+                taskStatus: "REJECTED",
+                taskProgressPercent: 0,
+                adminRemarks: remarks || "Rejected by admin",
+                updatedAt: now
+            });
         }
 
         broadcastTaskUpdate(task);
         if (global.io) {
             global.io.emit("new_alert", { alertId: task.alert, status: "REJECTED", taskId: task._id });
+            global.io.emit("task_status_updated", { taskId: task._id, alertId: task.alert, status: "REJECTED", progressPercent: 0 });
         }
 
         try {
@@ -489,8 +496,8 @@ const reassignTask = async (req, res) => {
             });
         }
 
-        // ENFORCE REASSIGNMENT LOCK: Cannot reassign if task has already been started
-        if (task.startedAt || task.status === "IN_PROGRESS" || task.status === "SUBMITTED" || task.status === "VERIFIED" || task.status === "COMPLETED") {
+        // ENFORCE REASSIGNMENT LOCK: Cannot reassign if task has already been started UNLESS it was rejected
+        if (task.status !== "REJECTED" && (task.startedAt || task.status === "IN_PROGRESS" || task.status === "SUBMITTED" || task.status === "VERIFIED" || task.status === "COMPLETED")) {
             return res.status(400).json({
                 success: false,
                 message: "This task cannot be reassigned because it has already been started by the staff member."
@@ -556,7 +563,24 @@ const reassignTask = async (req, res) => {
 
         if (task.alert) {
             const Alert = require("../models/Alert");
-            await Alert.findByIdAndUpdate(task.alert, { status: "ASSIGNED", assignedStaff: staff._id });
+            await Alert.findByIdAndUpdate(task.alert, {
+                status: "ASSIGNED",
+                taskStatus: "ASSIGNED",
+                taskProgressPercent: 0,
+                taskCleaningPhotos: [],
+                assignedStaff: staff._id,
+                startedAt: null,
+                submittedAt: null,
+                photosUploadedAt: null,
+                adminRemarks: notes || "",
+                updatedAt: now
+            });
+        }
+
+        broadcastTaskUpdate(task);
+        if (global.io) {
+            global.io.emit("new_alert", { alertId: task.alert, status: "ASSIGNED", taskId: task._id });
+            global.io.emit("task_status_updated", { taskId: task._id, alertId: task.alert, status: "ASSIGNED", progressPercent: 0 });
         }
 
         const device = task.device ? await Device.findById(task.device) : null;
