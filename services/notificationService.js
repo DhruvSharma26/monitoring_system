@@ -183,10 +183,28 @@ async function sendTaskAssignedNotification(taskDoc, staffUser, adminUser, devic
             });
         }
 
-        // Targeted Socket emission
+        // Targeted & Broadcast Socket emission
         if (global.io) {
+            const socketTaskPayload = {
+                taskId: taskDoc._id,
+                alertId: taskDoc.alert,
+                status: "ASSIGNED",
+                progressPercent: 0,
+                staffId: staffUser._id,
+                title: title,
+                message: message,
+                deviceUid: deviceUid,
+                assignedAt: dbNotification.createdAt
+            };
+
             global.io.to(`user_${staffUser._id}`).emit("new_notification", dbNotification);
             global.io.to(`user_${staffUser._id}`).emit("user_notification", dbNotification);
+            global.io.to(`user_${staffUser._id}`).emit("new_task", socketTaskPayload);
+            global.io.to(`user_${staffUser._id}`).emit("task_status_updated", socketTaskPayload);
+
+            global.io.emit("new_notification", dbNotification);
+            global.io.emit("new_task", socketTaskPayload);
+            global.io.emit("task_status_updated", socketTaskPayload);
         }
     } catch (error) {
         console.log("❌ sendTaskAssignedNotification Error:", error.message);
