@@ -379,9 +379,78 @@ const verifyTask = async (req, res) => {
         await task.save();
 
         // Mark associated Alert as VERIFIED in DB with resolvedAt timestamp
+        const Alert = require("../models/Alert");
+        const Device = require("../models/Device");
+        const LatestDeviceStatus = require("../models/LatestDeviceStatus");
+
         if (task.alert) {
-            const Alert = require("../models/Alert");
             await Alert.findByIdAndUpdate(task.alert, { status: "VERIFIED", resolvedAt: now });
+        }
+
+        // Find device
+        let dev = null;
+        if (task.device) {
+            dev = await Device.findById(task.device);
+        }
+        if (!dev && (task.deviceId || task.device_uid)) {
+            dev = await Device.findOne({
+                $or: [
+                    { deviceId: task.deviceId || task.device_uid },
+                    { device_uid: task.device_uid || task.deviceId }
+                ]
+            });
+        }
+
+        let isClean = false;
+        if (dev) {
+            // Check if any other OPEN or ASSIGNED alert remains for this device
+            const remainingOpenAlerts = await Alert.countDocuments({
+                $or: [
+                    { device: dev._id },
+                    { deviceId: dev.deviceId },
+                    { device_uid: dev.device_uid }
+                ],
+                status: { $in: ["OPEN", "ASSIGNED"] }
+            });
+
+            console.log(`[VERIFY_TASK] Remaining open/assigned alerts for device ${dev.deviceId}: ${remainingOpenAlerts}`);
+
+            if (remainingOpenAlerts === 0) {
+                isClean = true;
+                await Device.findByIdAndUpdate(dev._id, { status: "clean" });
+                await LatestDeviceStatus.findOneAndUpdate(
+                    { $or: [{ device_uid: dev.device_uid }, { deviceId: dev.deviceId }] },
+                    {
+                        $set: {
+                            feedback: 1,
+                            Counter: 0,
+                            CounterValue: 0,
+                            OdorSensVal: 0,
+                            OdorLevel: 0,
+                            status: "clean",
+                            timestamp: now
+                        }
+                    },
+                    { upsert: true }
+                );
+
+                if (global.io) {
+                    const cleanPayload = {
+                        device_uid: dev.device_uid,
+                        deviceId: dev.deviceId,
+                        status: "clean",
+                        toiletStatus: "Clean",
+                        feedback: 1,
+                        Counter: 0,
+                        CounterValue: 0,
+                        OdorSensVal: 0,
+                        OdorLevel: 0,
+                        timestamp: now
+                    };
+                    global.io.emit("device_status_update", cleanPayload);
+                    global.io.emit("toilet_status_updated", cleanPayload);
+                }
+            }
         }
 
         broadcastTaskUpdate(task);
@@ -392,7 +461,7 @@ const verifyTask = async (req, res) => {
         // Trigger notification to staff & clear alert notifications
         try {
             const staff = await User.findById(task.staff);
-            const device = await Device.findById(task.device);
+            const device = dev || (task.device ? await Device.findById(task.device) : null);
             const admin = await User.findById(req.user.id);
             const notificationService = require("../services/notificationService");
             notificationService.sendTaskVerifiedNotification(task, staff, admin, device);
@@ -405,8 +474,9 @@ const verifyTask = async (req, res) => {
 
         res.status(200).json({
             success: true,
-            message: "Toilet Marked Clean",
+            message: isClean ? "Toilet Verified & Marked Clean" : "Task Verified",
             verifiedAt: now,
+            isClean,
             task
         });
     } catch (error) {
@@ -414,8 +484,6 @@ const verifyTask = async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" });
     }
 };
-
-// Admin Rejects Task
 const rejectTask = async (req, res) => {
     try {
         const { taskId, remarks } = req.body;

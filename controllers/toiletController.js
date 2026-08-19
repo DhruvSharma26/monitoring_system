@@ -84,25 +84,30 @@ const getToiletDetails = async (req, res) => {
             }
         }
 
-        // 1. Status Calculation
+        // 1. Status Calculation: Driven by active open/assigned alerts & latest telemetry
         let status = "Clean";
-        if (latestStatus && (latestStatus.Counter !== undefined || latestStatus.OdorSensVal !== undefined || latestStatus.feedback !== undefined)) {
-            const { classifyTelemetry } = require("../services/alertClassifier");
-            const classification = classifyTelemetry(
-                latestStatus.feedback,
-                latestStatus.Counter ?? latestStatus.CounterValue,
-                latestStatus.OdorSensVal ?? latestStatus.OdorLevel,
-                userSettings
-            );
-            status = classification.toiletStatus || "Clean";
+        const openAlertsForDevice = (alertDocs || []).filter(a => a.status === "OPEN" || a.status === "ASSIGNED");
+        if (openAlertsForDevice.length > 0) {
+            const hasCritical = openAlertsForDevice.some(a => {
+                const cat = (a.alertCategory || a.alertType || a.toiletStatus || "").toLowerCase();
+                return cat.includes("critical");
+            });
+            status = hasCritical ? "Critical" : "Need Attention";
         } else {
-            const openAlertsForDevice = (alertDocs || []).filter(a => a.status === "OPEN" || a.status === "ASSIGNED");
-            if (openAlertsForDevice.length > 0) {
-                const hasCritical = openAlertsForDevice.some(a => {
-                    const cat = (a.alertCategory || a.alertType || a.toiletStatus || "").toLowerCase();
-                    return cat.includes("critical");
-                });
-                status = hasCritical ? "Critical" : "Need Attention";
+            // No open or assigned alerts in assigned or not assigned tab -> Toilet is Clean!
+            if (device.status === "clean" || (latestStatus && latestStatus.status === "clean")) {
+                status = "Clean";
+            } else if (latestStatus && (latestStatus.Counter !== undefined || latestStatus.OdorSensVal !== undefined || latestStatus.feedback !== undefined)) {
+                const { classifyTelemetry } = require("../services/alertClassifier");
+                const classification = classifyTelemetry(
+                    latestStatus.feedback,
+                    latestStatus.Counter ?? latestStatus.CounterValue,
+                    latestStatus.OdorSensVal ?? latestStatus.OdorLevel,
+                    userSettings
+                );
+                status = classification.toiletStatus || "Clean";
+            } else {
+                status = "Clean";
             }
         }
 

@@ -108,32 +108,37 @@ const getToilets = async (req, res) => {
             const todayDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
             const isToday = Boolean(latestDateStr && latestDateStr === todayDateStr);
 
-            // 2. Status Calculation: Driven by latest MQTT telemetry
+            // 2. Status Calculation: Driven by active open/assigned alerts & latest telemetry
             let toiletStatus = "Clean";
-            if (latestStatus && (latestStatus.Counter !== undefined || latestStatus.OdorSensVal !== undefined || latestStatus.feedback !== undefined)) {
-                const { classifyTelemetry } = require("../services/alertClassifier");
-                const classification = classifyTelemetry(
-                    latestStatus.feedback,
-                    latestStatus.Counter ?? latestStatus.CounterValue,
-                    latestStatus.OdorSensVal ?? latestStatus.OdorLevel,
-                    userSettings
-                );
+            const activeAlertsForDev = (openAlerts || []).filter(a => {
+                const aDevId = String(a.device || '');
+                const aUid = String(a.device_uid || '').toLowerCase();
+                const aDeviceId = String(a.deviceId || '').toLowerCase();
+                return (device._id && String(device._id) === aDevId) ||
+                       devUids.some(u => u.toLowerCase() === aUid || u.toLowerCase() === aDeviceId);
+            });
 
-                toiletStatus = classification.toiletStatus || "Clean";
-            } else if (openAlerts && openAlerts.length > 0) {
-                const activeAlertsForDev = openAlerts.filter(a => {
-                    const aDevId = String(a.device || '');
-                    const aUid = String(a.device_uid || '').toLowerCase();
-                    const aDeviceId = String(a.deviceId || '').toLowerCase();
-                    return (device._id && String(device._id) === aDevId) ||
-                           devUids.some(u => u.toLowerCase() === aUid || u.toLowerCase() === aDeviceId);
+            if (activeAlertsForDev.length > 0) {
+                const hasCritical = activeAlertsForDev.some(a => {
+                    const cat = (a.alertCategory || a.alertType || a.toiletStatus || '').toLowerCase();
+                    return cat.includes('critical');
                 });
-                if (activeAlertsForDev.length > 0) {
-                    const hasCritical = activeAlertsForDev.some(a => {
-                        const cat = (a.alertCategory || a.alertType || a.toiletStatus || '').toLowerCase();
-                        return cat.includes('critical');
-                    });
-                    toiletStatus = hasCritical ? "Critical" : "Need Attention";
+                toiletStatus = hasCritical ? "Critical" : "Need Attention";
+            } else {
+                // No open or assigned alerts in assigned or not assigned tab -> Toilet is Clean!
+                if (device.status === "clean" || (latestStatus && latestStatus.status === "clean")) {
+                    toiletStatus = "Clean";
+                } else if (latestStatus && (latestStatus.Counter !== undefined || latestStatus.OdorSensVal !== undefined || latestStatus.feedback !== undefined)) {
+                    const { classifyTelemetry } = require("../services/alertClassifier");
+                    const classification = classifyTelemetry(
+                        latestStatus.feedback,
+                        latestStatus.Counter ?? latestStatus.CounterValue,
+                        latestStatus.OdorSensVal ?? latestStatus.OdorLevel,
+                        userSettings
+                    );
+                    toiletStatus = classification.toiletStatus || "Clean";
+                } else {
+                    toiletStatus = "Clean";
                 }
             }
 

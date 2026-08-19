@@ -350,8 +350,262 @@ const getAlerts = async (req, res) => {
 module.exports = {
     getAlerts,
     getAlertDetails: async (req, res) => { res.status(200).json({ success: true }); },
-    resolveAlert: async (req, res) => { res.status(200).json({ success: true }); },
-    forceVerifyAlert: async (req, res) => { res.status(200).json({ success: true }); },
+    resolveAlert: async (req, res) => {
+        try {
+            const alertId = req.params.alertId || req.params.id || req.body.alertId || req.body.id;
+            const Alert = require("../models/Alert");
+            const Task = require("../models/Task");
+            const Device = require("../models/Device");
+            const LatestDeviceStatus = require("../models/LatestDeviceStatus");
+
+            const alert = await Alert.findById(alertId);
+            if (!alert) {
+                return res.status(404).json({ success: false, message: "Alert not found" });
+            }
+
+            const now = new Date();
+            alert.status = "VERIFIED";
+            alert.resolvedAt = now;
+            alert.adminRemarks = req.body.remarks || "Resolved & verified clean by admin";
+            alert.updatedAt = now;
+            await alert.save();
+
+            // Also verify any linked Task
+            let task = null;
+            if (alert.taskId) {
+                task = await Task.findById(alert.taskId);
+            }
+            if (!task) {
+                task = await Task.findOne({ alert: alert._id });
+            }
+
+            if (task) {
+                task.status = "VERIFIED";
+                task.verifiedAt = now;
+                task.completedAt = task.completedAt || now;
+                task.resolvedAt = task.resolvedAt || now;
+                task.progressPercent = 100;
+                task.timeline.push({
+                    status: "VERIFIED",
+                    timestamp: now,
+                    updatedBy: req.user ? req.user.id : null,
+                    notes: "Verified clean by admin via alert resolution"
+                });
+                await task.save();
+            }
+
+            // Check device and remaining open alerts
+            let dev = null;
+            if (alert.device) {
+                dev = await Device.findById(alert.device);
+            }
+            if (!dev && alert.deviceId) {
+                dev = await Device.findOne({ $or: [{ deviceId: alert.deviceId }, { device_uid: alert.deviceId }] });
+            }
+
+            let isClean = false;
+            if (dev) {
+                const remainingOpenAlerts = await Alert.countDocuments({
+                    $or: [
+                        { device: dev._id },
+                        { deviceId: dev.deviceId },
+                        { device_uid: dev.device_uid }
+                    ],
+                    status: { $in: ["OPEN", "ASSIGNED"] }
+                });
+
+                if (remainingOpenAlerts === 0) {
+                    isClean = true;
+                    await Device.findByIdAndUpdate(dev._id, { status: "clean" });
+                    await LatestDeviceStatus.findOneAndUpdate(
+                        { $or: [{ device_uid: dev.device_uid }, { deviceId: dev.deviceId }] },
+                        {
+                            $set: {
+                                feedback: 1,
+                                Counter: 0,
+                                CounterValue: 0,
+                                OdorSensVal: 0,
+                                OdorLevel: 0,
+                                status: "clean",
+                                timestamp: now
+                            }
+                        },
+                        { upsert: true }
+                    );
+
+                    if (global.io) {
+                        const cleanPayload = {
+                            device_uid: dev.device_uid,
+                            deviceId: dev.deviceId,
+                            status: "clean",
+                            toiletStatus: "Clean",
+                            feedback: 1,
+                            Counter: 0,
+                            CounterValue: 0,
+                            OdorSensVal: 0,
+                            OdorLevel: 0,
+                            timestamp: now
+                        };
+                        global.io.emit("device_status_update", cleanPayload);
+                        global.io.emit("toilet_status_updated", cleanPayload);
+                    }
+                }
+            }
+
+            if (global.io) {
+                global.io.emit("new_alert", { alertId: alert._id, status: "VERIFIED" });
+                if (task) {
+                    global.io.emit("task_status_updated", { taskId: task._id, alertId: alert._id, status: "VERIFIED", progressPercent: 100 });
+                }
+            }
+
+            try {
+                const notificationService = require("../services/notificationService");
+                await notificationService.markNotificationsReadForAlert(alert._id);
+            } catch (err) {
+                console.log("Error marking notifications read:", err.message);
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: isClean ? "Alert Verified & Restroom Marked Clean" : "Alert Verified",
+                alert,
+                task,
+                isClean
+            });
+        } catch (error) {
+            console.error("Error in resolveAlert:", error);
+            return res.status(500).json({ success: false, message: "Server error", error: error.message });
+        }
+    },
+    forceVerifyAlert: async (req, res) => {
+        try {
+            const alertId = req.params.alertId || req.params.id || req.body.alertId || req.body.id;
+            const Alert = require("../models/Alert");
+            const Task = require("../models/Task");
+            const Device = require("../models/Device");
+            const LatestDeviceStatus = require("../models/LatestDeviceStatus");
+
+            const alert = await Alert.findById(alertId);
+            if (!alert) {
+                return res.status(404).json({ success: false, message: "Alert not found" });
+            }
+
+            const now = new Date();
+            alert.status = "VERIFIED";
+            alert.resolvedAt = now;
+            alert.adminRemarks = req.body.remarks || "Force verified clean by admin";
+            alert.updatedAt = now;
+            await alert.save();
+
+            // Also verify any linked Task
+            let task = null;
+            if (alert.taskId) {
+                task = await Task.findById(alert.taskId);
+            }
+            if (!task) {
+                task = await Task.findOne({ alert: alert._id });
+            }
+
+            if (task) {
+                task.status = "VERIFIED";
+                task.verifiedAt = now;
+                task.completedAt = task.completedAt || now;
+                task.resolvedAt = task.resolvedAt || now;
+                task.progressPercent = 100;
+                task.timeline.push({
+                    status: "VERIFIED",
+                    timestamp: now,
+                    updatedBy: req.user ? req.user.id : null,
+                    notes: "Force verified clean by admin"
+                });
+                await task.save();
+            }
+
+            // Check device and remaining open alerts
+            let dev = null;
+            if (alert.device) {
+                dev = await Device.findById(alert.device);
+            }
+            if (!dev && alert.deviceId) {
+                dev = await Device.findOne({ $or: [{ deviceId: alert.deviceId }, { device_uid: alert.deviceId }] });
+            }
+
+            let isClean = false;
+            if (dev) {
+                const remainingOpenAlerts = await Alert.countDocuments({
+                    $or: [
+                        { device: dev._id },
+                        { deviceId: dev.deviceId },
+                        { device_uid: dev.device_uid }
+                    ],
+                    status: { $in: ["OPEN", "ASSIGNED"] }
+                });
+
+                if (remainingOpenAlerts === 0) {
+                    isClean = true;
+                    await Device.findByIdAndUpdate(dev._id, { status: "clean" });
+                    await LatestDeviceStatus.findOneAndUpdate(
+                        { $or: [{ device_uid: dev.device_uid }, { deviceId: dev.deviceId }] },
+                        {
+                            $set: {
+                                feedback: 1,
+                                Counter: 0,
+                                CounterValue: 0,
+                                OdorSensVal: 0,
+                                OdorLevel: 0,
+                                status: "clean",
+                                timestamp: now
+                            }
+                        },
+                        { upsert: true }
+                    );
+
+                    if (global.io) {
+                        const cleanPayload = {
+                            device_uid: dev.device_uid,
+                            deviceId: dev.deviceId,
+                            status: "clean",
+                            toiletStatus: "Clean",
+                            feedback: 1,
+                            Counter: 0,
+                            CounterValue: 0,
+                            OdorSensVal: 0,
+                            OdorLevel: 0,
+                            timestamp: now
+                        };
+                        global.io.emit("device_status_update", cleanPayload);
+                        global.io.emit("toilet_status_updated", cleanPayload);
+                    }
+                }
+            }
+
+            if (global.io) {
+                global.io.emit("new_alert", { alertId: alert._id, status: "VERIFIED" });
+                if (task) {
+                    global.io.emit("task_status_updated", { taskId: task._id, alertId: alert._id, status: "VERIFIED", progressPercent: 100 });
+                }
+            }
+
+            try {
+                const notificationService = require("../services/notificationService");
+                await notificationService.markNotificationsReadForAlert(alert._id);
+            } catch (err) {
+                console.log("Error marking notifications read:", err.message);
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: isClean ? "Alert Force Verified & Restroom Marked Clean" : "Alert Force Verified",
+                alert,
+                task,
+                isClean
+            });
+        } catch (error) {
+            console.error("Error in forceVerifyAlert:", error);
+            return res.status(500).json({ success: false, message: "Server error", error: error.message });
+        }
+    },
     assignAlert: async (req, res) => {
         try {
             const alertId = req.params.alertId || req.body.alertId || req.body.id;
