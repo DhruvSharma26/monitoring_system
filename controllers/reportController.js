@@ -511,7 +511,8 @@ const getDeviceReports = async (req, res) => {
                     startTime,
                     completionTime,
                     status: t.status,
-                    durationMins
+                    durationMins,
+                    updateCount: t.updateCount || 1
                 });
             });
 
@@ -539,6 +540,7 @@ const getDeviceReports = async (req, res) => {
                     date: formatDateStr(a.createdAt),
                     category: a.alertCategory || "Need Attention",
                     description: a.description || "System alert triggered",
+                    updateCount: a.updateCount || (matchedTask ? matchedTask.updateCount : 1) || 1,
                     feedbackValue: a.feedback !== undefined ? a.feedback : "N/A",
                     counterValue: a.Counter !== undefined ? a.Counter : "N/A",
                     odorValue: a.OdorSensVal !== undefined ? (a.OdorSensVal + " ppm") : "N/A",
@@ -589,7 +591,8 @@ const getDeviceReports = async (req, res) => {
             criticalAlerts: criticalAlertsCount,
             needAttentionAlerts: needAttentionAlertsCount,
             totalCleaningTasks: totalCleaningTasksCount,
-            completedCleaningTasks: completedCleaningTasksCount
+            completedCleaningTasks: completedCleaningTasksCount,
+            totalUpdations: devTasks.reduce((acc, t) => acc + (t.updateCount || 1), 0)
         };
 
         res.status(200).json({

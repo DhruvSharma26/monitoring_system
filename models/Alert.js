@@ -70,6 +70,10 @@ const alertSchema = new mongoose.Schema(
     feedbackSeverity: String,
 
     triggeredValues: [String],
+    updateCount: {
+        type: Number,
+        default: 1
+    },
 
     status: {
         type: String,

@@ -49,6 +49,10 @@ const taskSchema = new mongoose.Schema(
     completedAt: Date,
     durationMins: Number,
     rating: Number,
+    updateCount: {
+        type: Number,
+        default: 1
+    },
     progressPercent: { type: Number, default: 0 },
     notes: String,
     

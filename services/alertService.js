@@ -199,6 +199,7 @@ const processOrCreateDeviceAlertInternal = async (alertData) => {
 
             if (triggeredValues !== undefined) existingUnassignedAlert.triggeredValues = triggeredValues;
 
+            existingUnassignedAlert.updateCount = (existingUnassignedAlert.updateCount || 1) + 1;
             existingUnassignedAlert.status = initialAlertStatus;
             existingUnassignedAlert.createdAt = new Date();
             await existingUnassignedAlert.save();
@@ -245,6 +246,23 @@ const processOrCreateDeviceAlertInternal = async (alertData) => {
         // AUTOMATIC TASK ASSIGNMENT TO ASSIGNED STAFF
         if (assignedStaffId && device) {
             const existingTask = await Task.findOne({ alert: resultAlert._id });
+            if (existingTask && isOverwritten) {
+                existingTask.updateCount = (existingTask.updateCount || 1) + 1;
+                existingTask.priority = normalizedCategory === "Critical" ? "high" : "medium";
+                existingTask.title = `${normalizedCategory} Maintenance Task`;
+                existingTask.notes = `Updated telemetry (Updations: ${existingTask.updateCount}). ${description || ""}`;
+                await existingTask.save();
+                if (global.io) {
+                    global.io.emit("task_status_updated", {
+                        taskId: existingTask._id,
+                        status: existingTask.status,
+                        updateCount: existingTask.updateCount,
+                        staffId: existingTask.staff,
+                        deviceUid: device ? device.device_uid : null,
+                        updatedAt: existingTask.updatedAt
+                    });
+                }
+            }
             if (!existingTask) {
                 const now = new Date();
                 const newTask = await Task.create({

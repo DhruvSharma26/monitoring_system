@@ -15,6 +15,7 @@ function broadcastTaskUpdate(task, eventName = "task_status_updated") {
             submittedAt: task.submittedAt,
             verifiedAt: task.verifiedAt,
             progressPercent: task.progressPercent,
+            updateCount: task.updateCount || 1,
             staffId: task.staff,
             deviceUid: task.device ? task.device.device_uid : null,
             updatedAt: task.updatedAt

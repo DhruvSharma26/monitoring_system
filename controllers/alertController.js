@@ -493,14 +493,19 @@ const getAlerts = async (req, res) => {
 
         if (statusParam && statusParam !== 'all') {
             if (statusParam === 'not_assigned' || statusParam === 'unassigned' || statusParam === 'open') {
-                finalAlerts = finalAlerts.filter(a => a.assignmentStatus === "NOT_ASSIGNED" || a.status === "OPEN" || a.status === "NOT_ASSIGNED");
+                finalAlerts = finalAlerts.filter(a => (a.assignmentStatus === "NOT_ASSIGNED" || a.status === "OPEN") && a.status !== "EXPIRED" && a.assignmentStatus !== "EXPIRED");
             } else if (statusParam === 'assigned') {
-                finalAlerts = finalAlerts.filter(a => a.assignmentStatus === "ASSIGNED" || a.status === "ASSIGNED" || a.status === "IN_PROGRESS" || a.status === "SUBMITTED");
+                finalAlerts = finalAlerts.filter(a => (a.assignmentStatus === "ASSIGNED" || a.status === "ASSIGNED" || a.status === "IN_PROGRESS" || a.status === "SUBMITTED") && a.status !== "EXPIRED" && a.assignmentStatus !== "EXPIRED");
             } else if (statusParam === 'resolved' || statusParam === 'verified' || statusParam === 'completed') {
                 finalAlerts = finalAlerts.filter(a => a.status === "VERIFIED" || a.status === "RESOLVED" || a.status === "COMPLETED");
+            } else if (statusParam === 'expired') {
+                finalAlerts = finalAlerts.filter(a => a.status === "EXPIRED" || a.assignmentStatus === "EXPIRED");
             } else if (statusParam === 'active' || statusParam === 'pending') {
-                finalAlerts = finalAlerts.filter(a => a.status !== "VERIFIED" && a.status !== "RESOLVED" && a.status !== "COMPLETED");
+                finalAlerts = finalAlerts.filter(a => a.status !== "VERIFIED" && a.status !== "RESOLVED" && a.status !== "COMPLETED" && a.status !== "EXPIRED");
             }
+        } else {
+            // Default active view: exclude expired cards from active lists
+            finalAlerts = finalAlerts.filter(a => a.status !== "EXPIRED" && a.assignmentStatus !== "EXPIRED");
         }
 
         // Sort all merged alerts/tasks by latest activity timestamp descending (newest first)
