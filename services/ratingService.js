@@ -130,10 +130,13 @@ const get24HourMetrics = async (devUids) => {
 
         let totalUsage = 0;
         if (logs24h.length > 0) {
-            const counters = logs24h.map(l => Number(l.Counter) || 0);
+            const counters = logs24h.map(l => Number(l.Counter ?? l.counter ?? l.CounterValue ?? 0) || 0);
             const maxCounter = Math.max(...counters);
             const minCounter = Math.min(...counters);
             totalUsage = maxCounter > minCounter ? (maxCounter - minCounter) : maxCounter;
+            if (totalUsage === 0 && logs24h.length > 0) {
+                totalUsage = logs24h.length;
+            }
         }
 
         return {

@@ -257,8 +257,11 @@ const getDashboard = async (req, res) => {
                 ));
                 let maxCounter = 0;
                 for (const log of devLogs) {
-                    const c = Number(log.Counter) || 0;
+                    const c = Number(log.Counter ?? log.counter ?? log.CounterValue ?? 0) || 0;
                     if (c > maxCounter) maxCounter = c;
+                }
+                if (maxCounter === 0 && devLogs.length > 0) {
+                    maxCounter = devLogs.length;
                 }
                 deviceMap[device.device_uid || device._id] = maxCounter;
             }

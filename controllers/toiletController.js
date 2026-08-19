@@ -139,11 +139,13 @@ const getToiletDetails = async (req, res) => {
             dayEnd.setDate(now.getDate() - i);
             dayEnd.setHours(23, 59, 59, 999);
 
-            const dateStr = dayStart.toISOString().split("T")[0];
+            const targetDateStr = `${dayStart.getFullYear()}-${String(dayStart.getMonth() + 1).padStart(2, '0')}-${String(dayStart.getDate()).padStart(2, '0')}`;
+            const dateStr = targetDateStr;
             const dayLabel = dayNames[dayStart.getDay()];
 
             const dayLogs = last7DaysSensorLogs.filter(log => {
-                const logTime = new Date(log.timestamp).getTime();
+                if (log.date) return log.date === targetDateStr;
+                const logTime = new Date(log.timestamp || log.createdAt).getTime();
                 return logTime >= dayStart.getTime() && logTime <= dayEnd.getTime();
             });
 
@@ -164,6 +166,9 @@ const getToiletDetails = async (req, res) => {
                 for (const l of dayLogs) {
                     const c = Number(l.Counter ?? l.CounterValue ?? l.counterValue ?? l.counter) || 0;
                     if (c > dayCounter) dayCounter = c;
+                }
+                if (dayCounter === 0 && dayLogs.length > 0) {
+                    dayCounter = dayLogs.length;
                 }
 
                 // Average odor
