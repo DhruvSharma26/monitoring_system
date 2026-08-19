@@ -192,10 +192,15 @@ const getAlerts = async (req, res) => {
                 alertItem.photosUploadedAt = task.photosUploadedAt || alertItem.photosUploadedAt;
                 alertItem.submittedAt = task.submittedAt || alertItem.submittedAt;
                 alertItem.completedAt = task.completedAt || alertItem.completedAt;
+                alertItem.assignedAt = task.assignedAt || alertItem.assignedAt;
+                alertItem.reassignedAt = task.reassignedAt || alertItem.reassignedAt || null;
+                alertItem.reassignNotes = task.notes || alertItem.reassignNotes || "";
+                alertItem.adminRemarks = task.adminRemarks || alertItem.adminRemarks || "";
+                alertItem.reassignedStaffName = alertItem.assignedStaffName || "";
 
                 if (task.status === "REJECTED") {
                     alertItem.status = "REJECTED";
-                } else if (alertItem.status === "OPEN" || alertItem.status === "UNASSIGNED") {
+                } else if (task.status === "ASSIGNED" || task.status === "IN_PROGRESS" || task.status === "SUBMITTED" || alertItem.status === "OPEN" || alertItem.status === "UNASSIGNED") {
                     alertItem.status = "ASSIGNED";
                 }
             } else {
@@ -347,6 +352,169 @@ module.exports = {
     getAlertDetails: async (req, res) => { res.status(200).json({ success: true }); },
     resolveAlert: async (req, res) => { res.status(200).json({ success: true }); },
     forceVerifyAlert: async (req, res) => { res.status(200).json({ success: true }); },
-    assignAlert: async (req, res) => { res.status(200).json({ success: true }); },
+    assignAlert: async (req, res) => {
+        try {
+            const alertId = req.params.alertId || req.body.alertId || req.body.id;
+            const staffId = req.body.staff_id || req.body.staffId;
+            const taskName = req.body.taskName || req.body.title;
+            const notes = req.body.notes || req.body.remarks || taskName || "";
+
+            if (!alertId || !staffId) {
+                return res.status(400).json({ success: false, message: "Alert ID and Staff ID are required" });
+            }
+
+            const Alert = require("../models/Alert");
+            const Task = require("../models/Task");
+            const User = require("../models/User");
+            const Device = require("../models/Device");
+
+            const alert = await Alert.findById(alertId);
+            if (!alert) {
+                return res.status(404).json({ success: false, message: "Alert not found" });
+            }
+
+            const isObjectId = mongoose.Types.ObjectId.isValid(staffId);
+            let staff = isObjectId ? await User.findOne({ _id: staffId, role: "staff" }) : null;
+            if (!staff) {
+                staff = await User.findOne({ $or: [{ userId: staffId }, { email: staffId }], role: "staff" });
+            }
+
+            if (!staff) {
+                return res.status(404).json({ success: false, message: "Staff member not found" });
+            }
+
+            const now = new Date();
+            const prevStaffId = alert.assignedStaff ? alert.assignedStaff.toString() : (alert.staffId ? alert.staffId.toString() : null);
+            const isReassign = Boolean(prevStaffId || alert.status === "REJECTED" || alert.status === "ASSIGNED" || alert.taskId);
+
+            // Find or create device
+            let device = null;
+            if (alert.device && mongoose.Types.ObjectId.isValid(alert.device)) {
+                device = await Device.findById(alert.device);
+            }
+            if (!device && alert.deviceId) {
+                device = await Device.findOne({ $or: [{ deviceId: alert.deviceId }, { device_uid: alert.deviceId }] });
+            }
+            if (!device && alert.device_uid) {
+                device = await Device.findOne({ $or: [{ device_uid: alert.device_uid }, { deviceId: alert.device_uid }] });
+            }
+
+            // Find or create Task linked to Alert
+            let task = null;
+            if (alert.taskId && mongoose.Types.ObjectId.isValid(alert.taskId)) {
+                task = await Task.findById(alert.taskId);
+            }
+            if (!task) {
+                task = await Task.findOne({ alert: alert._id });
+            }
+
+            if (task) {
+                task.staff = staff._id;
+                task.status = "ASSIGNED";
+                task.progressPercent = 0;
+                task.assignedAt = now;
+                if (isReassign) task.reassignedAt = now;
+                task.assignedBy = req.user ? req.user.id : null;
+                if (notes) {
+                    task.notes = notes;
+                    task.adminRemarks = notes;
+                }
+                task.startedAt = null;
+                task.submittedAt = null;
+                task.photosUploadedAt = null;
+                task.verifiedAt = null;
+                task.completedAt = null;
+                task.resolvedAt = null;
+                task.beforeCleaningPhoto = "";
+                task.afterCleaningPhoto = "";
+                task.cleaningPhotos = [];
+
+                task.timeline.push({
+                    status: isReassign ? "REASSIGNED" : "ASSIGNED",
+                    timestamp: now,
+                    updatedBy: req.user ? req.user.id : null,
+                    prevStaff: prevStaffId,
+                    newStaff: staff._id.toString(),
+                    notes: notes || (isReassign ? `Reassigned to ${staff.name || staff.userId}` : `Assigned to ${staff.name || staff.userId}`)
+                });
+
+                await task.save();
+            } else {
+                task = await Task.create({
+                    taskName: taskName || `Cleaning Task — ${device?.location || alert.location || alert.deviceId || 'Restroom'}`,
+                    alert: alert._id,
+                    staff: staff._id,
+                    device: device ? device._id : null,
+                    device_uid: alert.device_uid || device?.device_uid || alert.deviceId,
+                    deviceId: alert.deviceId || device?.deviceId || alert.device_uid,
+                    status: "ASSIGNED",
+                    progressPercent: 0,
+                    assignedAt: now,
+                    reassignedAt: isReassign ? now : null,
+                    assignedBy: req.user ? req.user.id : null,
+                    notes: notes,
+                    adminRemarks: notes,
+                    timeline: [{
+                        status: isReassign ? "REASSIGNED" : "ASSIGNED",
+                        timestamp: now,
+                        updatedBy: req.user ? req.user.id : null,
+                        notes: notes || `Assigned to ${staff.name || staff.userId}`
+                    }]
+                });
+            }
+
+            // Update Alert document
+            alert.status = "ASSIGNED";
+            alert.assignedStaff = staff._id;
+            alert.assignedStaffName = staff.name;
+            alert.assignedStaffEmpId = staff.empId || staff.userId || "";
+            alert.taskId = task._id;
+            alert.taskStatus = "ASSIGNED";
+            alert.taskProgressPercent = 0;
+            alert.taskCleaningPhotos = [];
+            alert.assignedAt = alert.assignedAt || now;
+            if (isReassign) {
+                alert.reassignedAt = now;
+                alert.reassignedStaffName = staff.name;
+                alert.reassignNotes = notes;
+            }
+            alert.startedAt = null;
+            alert.submittedAt = null;
+            alert.photosUploadedAt = null;
+            alert.adminRemarks = notes;
+            alert.updatedAt = now;
+            await alert.save();
+
+            // Send notifications
+            try {
+                const notificationService = require("../services/notificationService");
+                if (isReassign) {
+                    await notificationService.sendTaskReassignedNotification(task, null, staff, device);
+                } else {
+                    await notificationService.sendTaskAssignedNotification(task, staff, req.user, device);
+                }
+            } catch (err) {
+                console.log("Error sending notification on assignAlert:", err.message);
+            }
+
+            // Emit sockets
+            if (global.io) {
+                global.io.emit("new_alert", { alertId: alert._id, status: "ASSIGNED", taskId: task._id });
+                global.io.emit("task_status_updated", { taskId: task._id, alertId: alert._id, status: "ASSIGNED", progressPercent: 0, staffId: staff._id });
+                global.io.emit("new_task", { taskId: task._id, status: "ASSIGNED", staffId: staff._id });
+                global.io.emit("task_reassigned", { taskId: task._id, status: "ASSIGNED", staffId: staff._id });
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: isReassign ? "Alert reassigned successfully" : "Alert assigned successfully",
+                alert,
+                task
+            });
+        } catch (error) {
+            console.error("Error in assignAlert:", error);
+            return res.status(500).json({ success: false, message: "Server error", error: error.message });
+        }
+    },
     deleteAlert: async (req, res) => { res.status(200).json({ success: true }); }
 };
