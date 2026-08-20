@@ -9,6 +9,8 @@ const ParticularRating = require("../models/ParticularRating");
 const DailyRating = require("../models/DailyRating");
 const Assignment = require("../models/Assignment");
 const { calculateParticularRating, calculateParticularRatingDetails } = require("../services/ratingService");
+const Settings = require("../models/Settings");
+const { classifyTelemetry } = require("../services/alertClassifier");
 
 // Date Range Validation (Max 1 Month = ~31 Days)
 const parseAndValidateReportDateRange = (reqQuery) => {
@@ -363,6 +365,17 @@ const getDeviceReports = async (req, res) => {
             }).populate("staff assignedBy timeline.updatedBy").sort({ createdAt: -1 }).lean()
         ]);
 
+
+        // Fetch open/assigned alerts and latest statuses for correct status classification
+        const [allLatestStatuses, allOpenAlerts, adminSettings] = await Promise.all([
+            LatestDeviceStatus.find({ device_uid: { $in: deviceUids } }).lean(),
+            Alert.find({
+                $or: [{ device_uid: { $in: deviceUids } }, { device: { $in: deviceIds } }],
+                status: { $in: ["OPEN", "ASSIGNED"] }
+            }).lean(),
+            Settings.findOne({ adminId: req.user.id }).lean()
+        ]);
+        const userSettings = adminSettings || { counterThreshold: 100, odorThreshold: 200 };
         // Overall Summary Calculations
         let overallTotalRatings = allParticularRatings.length;
         let overallSumRating = allParticularRatings.reduce((acc, r) => acc + r.particularRating, 0);
@@ -554,10 +567,36 @@ const getDeviceReports = async (req, res) => {
                 };
             });
 
-            const currentStatusLower = (device.status || '').toLowerCase();
+            // Status Classification: Same logic as toiletDashboardController & toiletController (Single Source of Truth)
             let status = "Clean";
-            if (currentStatusLower === 'critical') status = "Critical / Alert";
-            else if (currentStatusLower === 'warning' || currentStatusLower === 'attention') status = "Needs Attention";
+            const activeAlertsForDev = allOpenAlerts.filter(a => {
+                const aUid = String(a.device_uid || '').toLowerCase();
+                const aDeviceId = String(a.deviceId || '').toLowerCase();
+                const aDevId = String(a.device || '');
+                return (device._id && String(device._id) === aDevId) ||
+                       devUid.toLowerCase() === aUid ||
+                       devUid.toLowerCase() === aDeviceId;
+            });
+            if (activeAlertsForDev.length > 0) {
+                const hasCritical = activeAlertsForDev.some(a => {
+                    const cat = (a.alertCategory || a.alertType || a.toiletStatus || '').toLowerCase();
+                    return cat.includes('critical');
+                });
+                status = hasCritical ? "Critical" : "Need Attention";
+            } else {
+                const devLatest = allLatestStatuses.find(s =>
+                    (s.device_uid && s.device_uid.toLowerCase() === devUid.toLowerCase())
+                );
+                if (devLatest && (devLatest.Counter !== undefined || devLatest.OdorSensVal !== undefined || devLatest.feedback !== undefined)) {
+                    const classification = classifyTelemetry(
+                        devLatest.feedback,
+                        devLatest.Counter ?? devLatest.CounterValue,
+                        devLatest.OdorSensVal ?? devLatest.OdorLevel,
+                        userSettings
+                    );
+                    status = classification.toiletStatus || "Clean";
+                }
+            }
 
             const staffObj = device.assignedStaff;
             const assignedStaffInfo = staffObj ? (staffObj.name + " (" + (staffObj.empId || staffObj.userId || 'N/A') + ")") : "Unassigned Staff";
