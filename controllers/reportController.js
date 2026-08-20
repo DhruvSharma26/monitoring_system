@@ -598,25 +598,207 @@ const getDeviceReports = async (req, res) => {
                 }
             }
 
+            
+            // 7. Last 24 Hours Metrics Calculation (Real Data with NA fallback)
+            const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+            const logs24h = devLogs.filter(l => new Date(l.timestamp) >= twentyFourHoursAgo);
+            const ratings24h = devParticularRatings.filter(r => new Date(r.timestamp) >= twentyFourHoursAgo);
+
+            let avgRating24h = "NA";
+            if (ratings24h.length > 0) {
+                const sum = ratings24h.reduce((acc, r) => acc + (r.particularRating || 0), 0);
+                avgRating24h = parseFloat((sum / ratings24h.length).toFixed(2));
+            } else if (devParticularRatings.length > 0) {
+                const sum = devParticularRatings.reduce((acc, r) => acc + (r.particularRating || 0), 0);
+                avgRating24h = parseFloat((sum / devParticularRatings.length).toFixed(2));
+            }
+
+            let avgOdor24h = "NA";
+            if (logs24h.length > 0) {
+                const sum = logs24h.reduce((acc, l) => acc + (Number(l.OdorSensVal) || 0), 0);
+                avgOdor24h = Math.round(sum / logs24h.length);
+            } else if (devLogs.length > 0) {
+                const sum = devLogs.reduce((acc, l) => acc + (Number(l.OdorSensVal) || 0), 0);
+                avgOdor24h = Math.round(sum / devLogs.length);
+            }
+
+            let totalUsage24h = "NA";
+            if (logs24h.length > 0) {
+                const counters = logs24h.map(l => Number(l.Counter) || 0);
+                totalUsage24h = Math.max(0, Math.max(...counters) - Math.min(...counters));
+            } else if (devLogs.length > 0) {
+                const counters = devLogs.map(l => Number(l.Counter) || 0);
+                totalUsage24h = Math.max(0, Math.max(...counters) - Math.min(...counters));
+            }
+
+            // Period Metrics
+            let avgRatingPeriod = "NA";
+            if (devParticularRatings.length > 0) {
+                const sum = devParticularRatings.reduce((acc, r) => acc + (r.particularRating || 0), 0);
+                avgRatingPeriod = parseFloat((sum / devParticularRatings.length).toFixed(2));
+            }
+
+            let avgOdorPeriod = "NA";
+            if (devLogs.length > 0) {
+                const sum = devLogs.reduce((acc, l) => acc + (Number(l.OdorSensVal) || 0), 0);
+                avgOdorPeriod = Math.round(sum / devLogs.length);
+            }
+
+            let totalUsagePeriod = 0;
+            if (usageData.length > 0) {
+                totalUsagePeriod = usageData.reduce((acc, u) => acc + (u.totalUsage || 0), 0);
+            }
+
+            // Last Cleaned Resolution
+            const completedTasks = devTasks.filter(t => ["COMPLETED", "VERIFIED", "RESOLVED"].includes(t.status));
+            const latestCleanedTask = completedTasks.length > 0 ? completedTasks[0] : (devTasks.length > 0 ? devTasks[0] : null);
+
+            let lastCleanedTimestamp = "NA";
+            let staffName = device.assignedStaff ? (device.assignedStaff.name || "Assigned Staff") : "Unassigned";
+            let staffId = device.assignedStaff ? (device.assignedStaff.empId || device.assignedStaff.userId || "NA") : "NA";
+            let staffUserId = device.assignedStaff ? (device.assignedStaff.userId || "NA") : "NA";
+            let staffEmpId = device.assignedStaff ? (device.assignedStaff.empId || "NA") : "NA";
+
+            if (latestCleanedTask) {
+                const cTime = latestCleanedTask.completedAt || latestCleanedTask.verifiedAt || latestCleanedTask.submittedAt || latestCleanedTask.updatedAt || latestCleanedTask.createdAt;
+                if (cTime) {
+                    lastCleanedTimestamp = formatTimeStr(cTime);
+                }
+                if (latestCleanedTask.staff) {
+                    staffName = latestCleanedTask.staff.name || staffName;
+                    staffUserId = latestCleanedTask.staff.userId || staffUserId;
+                    staffEmpId = latestCleanedTask.staff.empId || staffEmpId;
+                    staffId = staffEmpId !== "NA" ? staffEmpId : (staffUserId !== "NA" ? staffUserId : staffId);
+                }
+            }
+
+            // Flat Cleaning Logs for PDF/CSV Exporter
+            const cleaningLogs = devTasks.map(t => ({
+                taskId: t._id.toString(),
+                title: t.taskName || t.title || "Restroom Cleaning & Hygiene",
+                staffName: t.staff ? (t.staff.name || "Staff Member") : staffName,
+                staffUserId: t.staff ? (t.staff.userId || "NA") : staffUserId,
+                staffEmpId: t.staff ? (t.staff.empId || "NA") : staffEmpId,
+                assignedTime: formatTimeStr(t.assignedAt || t.createdAt),
+                startedTime: formatTimeStr(t.startedAt),
+                submittedTime: formatTimeStr(t.submittedAt),
+                completionTime: formatTimeStr(t.completedAt || t.verifiedAt),
+                verifiedTime: formatTimeStr(t.verifiedAt),
+                status: t.status || "OPEN",
+                updateCount: t.updateCount || 1
+            }));
+
+            // Feedback 7 Days / Datewise Breakdown History
+            const feedback7DaysHistory = Array.from(dateMap.entries()).map(([dateStr, dObj]) => {
+                const dateParts = dateStr.split("-");
+                let dayName = "NA";
+                let dayNameShort = "NA";
+                if (dateParts.length === 3) {
+                    const dObjDate = new Date(Number(dateParts[0]), Number(dateParts[1]) - 1, Number(dateParts[2]));
+                    if (!isNaN(dObjDate.getTime())) {
+                        dayName = dayNames[dObjDate.getDay()];
+                        dayNameShort = dayNamesShort[dObjDate.getDay()];
+                    }
+                }
+                const devDayLogs = devLogs.filter(l => (l.date || formatDateStr(l.timestamp)) === dateStr);
+                let dayAvgOdor = "NA";
+                if (devDayLogs.length > 0) {
+                    const odorSum = devDayLogs.reduce((acc, l) => acc + (Number(l.OdorSensVal) || 0), 0);
+                    dayAvgOdor = Math.round(odorSum / devDayLogs.length);
+                }
+                const dayUsage = usageMap.get(dateStr);
+                const dayCounter = dayUsage ? Math.max(0, dayUsage.max - dayUsage.min) : 0;
+
+                return {
+                    date: dateStr,
+                    day: dayNameShort,
+                    dayFull: dayName,
+                    rating: dObj.totalRatings > 0 ? parseFloat((dObj.sumPR / dObj.totalRatings).toFixed(2)) : "NA",
+                    odor: dayAvgOdor,
+                    counter: dayCounter,
+                    feedbackCount: dObj.totalRatings,
+                    totalFeedback: dObj.totalRatings
+                };
+            });
+
+            // Task Activity Breakdown
+            const totalStaffSubmittedTasks = devTasks.filter(t => ["SUBMITTED", "COMPLETED", "VERIFIED", "RESOLVED"].includes(t.status)).length;
+            const totalAdminVerifiedTasks = devTasks.filter(t => ["VERIFIED", "RESOLVED"].includes(t.status)).length;
+            const pendingVerification = devTasks.filter(t => t.status === "SUBMITTED").length;
+
+            const dailyTaskSummary = Array.from(taskDateMap.entries()).map(([dateStr, tasksList]) => {
+                const submitted = tasksList.filter(t => ["SUBMITTED", "COMPLETED", "VERIFIED", "RESOLVED"].includes(t.status)).length;
+                const verified = tasksList.filter(t => ["VERIFIED", "RESOLVED"].includes(t.status)).length;
+                const pending = tasksList.filter(t => t.status === "SUBMITTED").length;
+
+                const staffMap = new Map();
+                tasksList.forEach(t => {
+                    const sName = t.staffName || "Staff Member";
+                    if (!staffMap.has(sName)) {
+                        staffMap.set(sName, { staffName: sName, submitted: 0, verified: 0 });
+                    }
+                    const sObj = staffMap.get(sName);
+                    if (["SUBMITTED", "COMPLETED", "VERIFIED", "RESOLVED"].includes(t.status)) sObj.submitted++;
+                    if (["VERIFIED", "RESOLVED"].includes(t.status)) sObj.verified++;
+                });
+
+                return {
+                    date: dateStr,
+                    staffSubmittedTasks: submitted,
+                    adminVerifiedTasks: verified,
+                    pendingVerification: pending,
+                    staffBreakdown: Array.from(staffMap.values()),
+                    taskList: tasksList
+                };
+            });
+
             const staffObj = device.assignedStaff;
-            const assignedStaffInfo = staffObj ? (staffObj.name + " (" + (staffObj.empId || staffObj.userId || 'N/A') + ")") : "Unassigned Staff";
+            const assignedStaffInfo = staffObj ? (staffObj.name + " (" + (staffObj.empId || staffObj.userId || "NA") + ")") : "Unassigned Staff";
 
             return {
                 deviceId: device.deviceId || device.device_uid,
                 deviceUid: device.device_uid,
-                deviceName: device.location ? (device.location + " (" + (device.floor || 'G') + ")") : (device.deviceId || device.device_uid),
-                location: device.location ? (device.location + " - Floor " + (device.floor || 'G')) : "Main Restroom",
+                deviceName: device.location ? (device.location + " (" + (device.floor || "G") + ")") : (device.deviceId || device.device_uid),
+                location: device.location ? (device.location + " - Floor " + (device.floor || "G")) : "Main Restroom",
                 status: status,
                 assignedStaff: assignedStaffInfo,
 
+                // Summary & 24h / Period Metrics
+                averageRating: avgRating24h,
+                averageRating24h: avgRating24h,
+                averageOdor: avgOdor24h,
+                averageOdor24h: avgOdor24h,
+                totalUsage: totalUsage24h,
+                totalUsage24h: totalUsage24h,
+
+                averageRating7Days: avgRatingPeriod,
+                averageOdor7Days: avgOdorPeriod,
+                totalUsage7Days: totalUsagePeriod,
+
+                lastCleanedTimestamp,
+                staffName,
+                staffId,
+                staffUserId,
+                staffEmpId,
+
+                // Comprehensive Sub-tables
                 dailyRatingTable,
                 individualRatings,
                 counterLogs,
                 odorLogs,
                 usageData,
                 cleaningHistory,
-                alertsHistory
+                alertsHistory,
+                cleaningLogs,
+                feedback7DaysHistory,
+                dailyTaskSummary,
+
+                // Task Summary Counters
+                totalStaffSubmittedTasks,
+                totalAdminVerifiedTasks,
+                pendingVerification
             };
+
         });
 
         const reportSummary = {
