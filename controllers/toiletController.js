@@ -94,21 +94,8 @@ const getToiletDetails = async (req, res) => {
             });
             status = hasCritical ? "Critical" : "Need Attention";
         } else {
-            // No open or assigned alerts in assigned or not assigned tab -> Toilet is Clean!
-            if (device.status === "clean" || (latestStatus && latestStatus.status === "clean")) {
-                status = "Clean";
-            } else if (latestStatus && (latestStatus.Counter !== undefined || latestStatus.OdorSensVal !== undefined || latestStatus.feedback !== undefined)) {
-                const { classifyTelemetry } = require("../services/alertClassifier");
-                const classification = classifyTelemetry(
-                    latestStatus.feedback,
-                    latestStatus.Counter ?? latestStatus.CounterValue,
-                    latestStatus.OdorSensVal ?? latestStatus.OdorLevel,
-                    userSettings
-                );
-                status = classification.toiletStatus || "Clean";
-            } else {
-                status = "Clean";
-            }
+            // No open or assigned alerts -> Toilet is Clean!
+            status = "Clean";
         }
 
         // 2. Resolve Last Cleaned Task & Staff

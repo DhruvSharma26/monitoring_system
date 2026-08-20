@@ -421,7 +421,7 @@ module.exports = {
                         { $or: [{ device_uid: dev.device_uid }, { deviceId: dev.deviceId }] },
                         {
                             $set: {
-                                feedback: 1,
+                                feedback: 4,
                                 Counter: 0,
                                 CounterValue: 0,
                                 OdorSensVal: 0,
@@ -439,7 +439,7 @@ module.exports = {
                             deviceId: dev.deviceId,
                             status: "clean",
                             toiletStatus: "Clean",
-                            feedback: 1,
+                            feedback: 4,
                             Counter: 0,
                             CounterValue: 0,
                             OdorSensVal: 0,
@@ -549,7 +549,7 @@ module.exports = {
                         { $or: [{ device_uid: dev.device_uid }, { deviceId: dev.deviceId }] },
                         {
                             $set: {
-                                feedback: 1,
+                                feedback: 4,
                                 Counter: 0,
                                 CounterValue: 0,
                                 OdorSensVal: 0,
@@ -567,7 +567,7 @@ module.exports = {
                             deviceId: dev.deviceId,
                             status: "clean",
                             toiletStatus: "Clean",
-                            feedback: 1,
+                            feedback: 4,
                             Counter: 0,
                             CounterValue: 0,
                             OdorSensVal: 0,
