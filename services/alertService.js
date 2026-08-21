@@ -149,8 +149,9 @@ const processOrCreateDeviceAlertInternal = async (alertData) => {
 
             if (altDateStr === todayDateStr && !isStarted) {
                 // Same calendar day & unstarted alert -> Overwrite this alert card with new telemetry
-                existingUnassignedAlert = alt;
-                break;
+                if (!existingUnassignedAlert) {
+                    existingUnassignedAlert = alt;
+                }
             } else if (altDateStr !== todayDateStr) {
                 // Unresolved alert from a previous calendar day -> Mark EXPIRED
                 await Alert.updateOne(
@@ -164,6 +165,23 @@ const processOrCreateDeviceAlertInternal = async (alertData) => {
                         { $set: { status: "EXPIRED" } }
                     );
                 }
+
+                if (global.io) {
+                    global.io.emit("alert_updated", {
+                        alertId: alt._id,
+                        status: "EXPIRED",
+                        assignmentStatus: "EXPIRED"
+                    });
+                    if (linkedTask) {
+                        global.io.emit("task_status_updated", {
+                            taskId: linkedTask._id,
+                            alertId: alt._id,
+                            status: "EXPIRED",
+                            staffId: linkedTask.staff
+                        });
+                    }
+                }
+
                 console.log(`⏰ Previous day unresolved alert ${alt._id} for device [${targetUid}] marked EXPIRED.`);
             }
         }

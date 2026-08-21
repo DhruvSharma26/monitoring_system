@@ -267,6 +267,7 @@ const getAlerts = async (req, res) => {
             alertItem.alertType = alertItem.alertType || alertItem.alertCategory || 'NEEDS_ATTENTION';
             alertItem.category = alertItem.alertCategory;
             alertItem.type = alertItem.alertType;
+            alertItem.expiredAlertType = alertItem.alertCategory;
 
             const latestTime = alertItem.updatedAt || alertItem.createdAt;
             alertItem.timestamp = latestTime;
