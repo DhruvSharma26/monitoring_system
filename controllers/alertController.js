@@ -135,7 +135,8 @@ const getAlerts = async (req, res) => {
                 processedTaskIds.add(task._id.toString());
                 alertItem.taskId = task._id;
                 alertItem.taskStatus = task.status;
-                alertItem.adminRemarks = task.adminRemarks || alertItem.adminRemarks || "";
+                alertItem.adminRemarks = task.adminRemarks || alertItem.adminRemarks || task.notes || alertItem.notes || "";
+            alertItem.reassignNotes = alertItem.reassignNotes || (task ? task.notes : null) || alertItem.adminRemarks || "";
                 alertItem.taskProgressPercent = (task.status === "VERIFIED" || task.status === "RESOLVED") ? 100 : (task.progressPercent || 0);
 
                 if (task.status === "VERIFIED" || task.status === "RESOLVED") {
@@ -269,9 +270,13 @@ const getAlerts = async (req, res) => {
             alertItem.type = alertItem.alertType;
             alertItem.expiredAlertType = alertItem.alertCategory;
 
+            const originalCreationTime = alertItem.createdAt || (alertItem._id && typeof alertItem._id.getTimestamp === 'function' ? alertItem._id.getTimestamp() : new Date());
             const latestTime = alertItem.updatedAt || alertItem.createdAt;
+            alertItem.firstTriggeredAt = originalCreationTime;
+            alertItem.triggeredAt = originalCreationTime;
+            alertItem.createdAt = originalCreationTime;
+            alertItem.updatedAt = alertItem.updatedAt || latestTime;
             alertItem.timestamp = latestTime;
-            alertItem.createdAt = latestTime;
 
             if (alertItem.staffId) {
                 const staffObj = {

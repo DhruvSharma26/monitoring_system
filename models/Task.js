@@ -63,6 +63,7 @@ const taskSchema = new mongoose.Schema(
         uploadedAt: { type: Date, default: Date.now }
     }],
     adminRemarks: String,
+    reassignNotes: String,
     verifiedAt: Date,
     resolvedAt: Date,
 

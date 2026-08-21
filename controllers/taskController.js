@@ -601,9 +601,10 @@ const reassignTask = async (req, res) => {
         task.assignedAt = now;
         task.reassignedAt = now;
         task.assignedBy = req.user ? req.user.id : null;
-        if (notes) {
-            task.notes = notes;
-            task.adminRemarks = notes;
+        const reassignReason = notes || req.body.reason || req.body.remarks || "";
+        if (reassignReason) {
+            task.notes = reassignReason;
+            task.adminRemarks = reassignReason;
         }
 
         // Clear previous work and submission state so staff can start fresh work & upload new photos
@@ -640,7 +641,9 @@ const reassignTask = async (req, res) => {
                 startedAt: null,
                 submittedAt: null,
                 photosUploadedAt: null,
-                adminRemarks: notes || "",
+                adminRemarks: reassignReason || task.adminRemarks || "",
+                reassignNotes: reassignReason || task.notes || "",
+                notes: reassignReason || task.notes || "",
                 updatedAt: now
             });
         }
@@ -886,7 +889,7 @@ const forceVerifyTask = async (req, res) => {
     try {
         const taskId = req.params.taskId || req.body.taskId;
         const alertId = req.body.alertId;
-        const remarks = req.body.remarks || "Force verified by admin";
+        const remarks = req.body.remarks || req.body.reason || req.body.notes || "Force verified by admin";
 
         let task = taskId ? await Task.findById(taskId) : null;
         if (!task && alertId) {
@@ -903,24 +906,36 @@ const forceVerifyTask = async (req, res) => {
                 status: "EXPIRED",
                 timestamp: now,
                 updatedBy: req.user ? req.user.id : null,
-                notes: "Force verified by admin - task expired for staff"
+                notes: `Force verified by admin: ${remarks}`
             });
             await task.save();
 
             if (task.alert) {
                 const Alert = require("../models/Alert");
-                await Alert.findByIdAndUpdate(task.alert, { status: "VERIFIED", resolvedAt: now });
+                await Alert.findByIdAndUpdate(task.alert, {
+                    status: "VERIFIED",
+                    resolvedAt: now,
+                    adminRemarks: remarks,
+                    remarks: remarks,
+                    updatedAt: now
+                });
             }
 
             if (global.io) {
-                global.io.emit("task_status_updated", { taskId: task._id, status: "EXPIRED" });
-                global.io.emit("new_alert", { alertId: task.alert, status: "VERIFIED" });
+                global.io.emit("task_status_updated", { taskId: task._id, status: "EXPIRED", adminRemarks: remarks });
+                global.io.emit("new_alert", { alertId: task.alert, status: "VERIFIED", adminRemarks: remarks });
             }
         } else if (alertId) {
             const Alert = require("../models/Alert");
-            await Alert.findByIdAndUpdate(alertId, { status: "VERIFIED", resolvedAt: now });
+            await Alert.findByIdAndUpdate(alertId, {
+                status: "VERIFIED",
+                resolvedAt: now,
+                adminRemarks: remarks,
+                remarks: remarks,
+                updatedAt: now
+            });
             if (global.io) {
-                global.io.emit("new_alert", { alertId: alertId, status: "VERIFIED" });
+                global.io.emit("new_alert", { alertId: alertId, status: "VERIFIED", adminRemarks: remarks });
             }
         }
 

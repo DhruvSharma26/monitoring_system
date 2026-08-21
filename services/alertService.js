@@ -219,7 +219,7 @@ const processOrCreateDeviceAlertInternal = async (alertData) => {
 
             existingUnassignedAlert.updateCount = (existingUnassignedAlert.updateCount || 1) + 1;
             existingUnassignedAlert.status = initialAlertStatus;
-            existingUnassignedAlert.createdAt = new Date();
+            existingUnassignedAlert.updatedAt = new Date();
             await existingUnassignedAlert.save();
 
             resultAlert = existingUnassignedAlert;

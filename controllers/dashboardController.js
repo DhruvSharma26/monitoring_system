@@ -442,17 +442,21 @@ const formatAlertItem = (alertDoc, deviceMap = {}) => {
         alertItem.status = "EXPIRED";
         alertItem.assignmentStatus = "EXPIRED";
         alertItem.isExpired = true;
-        alertItem.adminRemarks = "";
-        alertItem.remarks = `EXPIRED (${alertItem.alertCategory}): Alert from previous day was not resolved`;
+        alertItem.adminRemarks = alertItem.adminRemarks || "";
+        alertItem.remarks = alertItem.adminRemarks || `EXPIRED (${alertItem.alertCategory}): Alert from previous day was not resolved`;
     } else if (alertItem.status === "OPEN" || alertItem.assignmentStatus === "NOT_ASSIGNED") {
         alertItem.status = alertItem.alertType || alertItem.alertCategory || alertItem.status || "Critical";
-        alertItem.adminRemarks = "";
-        alertItem.remarks = alertItem.description || alertItem.alertType || 'Alert triggered';
+        alertItem.adminRemarks = alertItem.adminRemarks || "";
+        alertItem.remarks = alertItem.adminRemarks || alertItem.description || alertItem.alertType || 'Alert triggered';
     }
 
+    const originalCreationTime = alertItem.createdAt || (alertItem._id && typeof alertItem._id.getTimestamp === 'function' ? alertItem._id.getTimestamp() : new Date());
     const latestTime = alertItem.updatedAt || alertItem.createdAt;
+    alertItem.firstTriggeredAt = originalCreationTime;
+    alertItem.triggeredAt = originalCreationTime;
+    alertItem.createdAt = originalCreationTime;
+    alertItem.updatedAt = alertItem.updatedAt || latestTime;
     alertItem.timestamp = latestTime;
-    alertItem.createdAt = latestTime;
 
     return alertItem;
 };

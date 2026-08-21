@@ -89,7 +89,24 @@ const alertSchema = new mongoose.Schema(
         default: "OPEN"
     },
 
-    resolvedAt: Date
+    resolvedAt: Date,
+
+    adminRemarks: {
+        type: String,
+        default: ""
+    },
+    reassignNotes: {
+        type: String,
+        default: ""
+    },
+    remarks: {
+        type: String,
+        default: ""
+    },
+    notes: {
+        type: String,
+        default: ""
+    }
 },
 {
     timestamps: true
