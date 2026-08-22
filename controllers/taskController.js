@@ -199,10 +199,10 @@ const uploadTaskPhotos = async (req, res) => {
         }
 
         // Validate Minimum 1 and Maximum 5 images rule
-        if (files.length < 1) {
+        if (files.length < 3) {
             return res.status(400).json({
                 success: false,
-                message: "Minimum 1 cleaning photo is required."
+                message: "Minimum 3 cleaning photos are required."
             });
         }
 
