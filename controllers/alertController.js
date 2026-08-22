@@ -199,7 +199,11 @@ const getAlerts = async (req, res) => {
                 alertItem.adminRemarks = task.adminRemarks || alertItem.adminRemarks || "";
                 alertItem.reassignedStaffName = alertItem.assignedStaffName || "";
 
-                if (task.status === "REJECTED") {
+                if (task.status === "EXPIRED" || alertItem.status === "EXPIRED" || alertItem.assignmentStatus === "EXPIRED") {
+                    alertItem.status = "EXPIRED";
+                    alertItem.assignmentStatus = "EXPIRED";
+                    alertItem.isExpired = true;
+                } else if (task.status === "REJECTED") {
                     alertItem.status = "REJECTED";
                 } else if (task.status === "ASSIGNED" || task.status === "IN_PROGRESS" || task.status === "SUBMITTED" || alertItem.status === "OPEN" || alertItem.status === "UNASSIGNED") {
                     alertItem.status = "ASSIGNED";
