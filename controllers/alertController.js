@@ -188,7 +188,7 @@ const getAlerts = async (req, res) => {
                 alertItem.taskId = task._id.toString();
                 alertItem.taskStatus = task.status || "ASSIGNED";
                 alertItem.taskProgressPercent = (task.status === "VERIFIED" || task.status === "RESOLVED") ? 100 : (task.status === "REJECTED" ? 0 : (task.status === "SUBMITTED" ? 90 : (task.status === "IN_PROGRESS" ? 50 : (task.progressPercent || 25))));
-                alertItem.taskCleaningPhotos = task.cleaningPhotos ? task.cleaningPhotos.map(p => typeof p === 'string' ? p : (p.url || p)) : [];
+                let taskPhotos = Array.isArray(task.cleaningPhotos) ? task.cleaningPhotos.map(p => typeof p === 'string' ? p : (p.url || p.path || '')) : []; if (taskPhotos.length === 0) { if (task.beforeCleaningPhoto) taskPhotos.push(task.beforeCleaningPhoto); if (task.afterCleaningPhoto) taskPhotos.push(task.afterCleaningPhoto); } alertItem.taskCleaningPhotos = taskPhotos.filter(Boolean);
                 alertItem.startedAt = task.startedAt || alertItem.startedAt;
                 alertItem.photosUploadedAt = task.photosUploadedAt || alertItem.photosUploadedAt;
                 alertItem.submittedAt = task.submittedAt || alertItem.submittedAt;
